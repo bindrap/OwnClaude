@@ -121,6 +121,8 @@ class OllamaClient:
             "messages": self.conversation_history,
             "temperature": cloud_config.temperature,
             "top_p": cloud_config.top_p,
+            # Force non-streaming responses so we can parse a single JSON object
+            "stream": False,
         }
 
         try:
@@ -132,7 +134,13 @@ class OllamaClient:
             )
             response.raise_for_status()
 
-            result = response.json()
+            try:
+                result = response.json()
+            except json.JSONDecodeError:
+                # Some endpoints may return newline-delimited JSON chunks; parse the first one
+                first_line = response.text.strip().splitlines()[0]
+                result = json.loads(first_line)
+
             assistant_message = result['message']['content']
 
             # Add assistant response to history

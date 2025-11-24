@@ -2,6 +2,7 @@
 
 import json
 import re
+from pathlib import Path
 from typing import Dict, Any, Optional, List
 
 from loguru import logger
@@ -19,15 +20,16 @@ class CommandExecutor:
     # System prompt for the AI
     SYSTEM_PROMPT = """You are OwnClaude, a helpful AI assistant that helps users control their computer through natural language commands.
 
-Your role is to understand user requests and respond with structured actions. You can:
+Your role is to understand user requests and respond with exactly one structured action. You can:
 1. Open and close applications
 2. Create, read, modify, append, and delete files (and directories)
 3. Open documents/paths with the default application
 4. Search for files and list directories
 5. Open URLs in browsers
 6. Answer questions and provide information
+7. Ask a quick clarifying question when needed (use the \"clarify\" action)
 
-When a user asks you to perform an action, respond with a JSON structure in this format:
+When a user asks you to perform an action, respond with a single JSON object in this format. Do not include multiple JSON objects or any text outside the code block.
 
 {
     "action": "action_type",
@@ -53,9 +55,11 @@ Available actions:
 - "search_files": Search for files (params: directory, pattern)
 - "open_url": Open a URL (params: url)
 - "chat": Just answer a question or have a conversation (no params needed)
+- "clarify": Ask the user a brief question to clarify intent before acting (params: question)
 
-For conversational messages where no action is needed, use the "chat" action.
+For conversational messages where no action is needed, use the "chat" action and put the final answer in "explanation". Do not suggest or perform other actions when a direct answer suffices.
 If additional context or a task plan is provided, use it to pick sensible defaults (paths, filenames, tools) and prefer safer options first.
+Use paths relative to the current working directory unless the user provided an absolute path. Do NOT invent parent paths (\"../\") if the user did not request them; ask a clarifying question instead.
 
 Examples:
 
@@ -83,7 +87,16 @@ User: "what's the weather today?"
     "explanation": "I don't have access to real-time weather data, but I can help you open a weather website or application if you'd like!"
 }
 
-Always wrap your JSON response in ```json``` code blocks."""
+User: "what is 2+2?"
+```json
+{
+    "action": "chat",
+    "parameters": {},
+    "explanation": "2 + 2 = 4."
+}
+```
+
+Always wrap your JSON response in ```json``` code blocks, with nothing before or after the code block."""
 
     def __init__(
         self,
@@ -150,7 +163,20 @@ Always wrap your JSON response in ```json``` code blocks."""
         plan: Optional[Dict[str, Any]]
     ) -> str:
         """Attach light context/plan hints to the user input for the model."""
-        parts = [user_input]
+        cwd = Path.cwd()
+        parts = [
+            f"{user_input}\n(Current working directory: {cwd}. Use relative paths here unless given an absolute path.)"
+        ]
+
+        # Ask clarifying questions when needed
+        parts.append(
+            "Before acting, briefly ask any needed clarifying questions (one message) "
+            "if the request is ambiguous or paths are unclear. Otherwise act directly."
+        )
+        parts.append(
+            "Use paths relative to the current working directory provided above; do not use '../' "
+            "unless explicitly requested. If a file is not found, ask which path to use."
+        )
 
         if plan:
             try:
@@ -168,6 +194,11 @@ Always wrap your JSON response in ```json``` code blocks."""
                 context_lines.append(f"{role}: {content}")
             parts.append("Recent context:\n" + "\n".join(context_lines))
 
+        parts.append(
+            "Act now: produce exactly one JSON action object per system prompt, "
+            "wrapped in ```json``` with nothing else. Do not repeat or restate the task plan."
+        )
+
         return "\n\n".join(parts)
 
     def _parse_ai_response(self, response: str) -> Optional[Dict[str, Any]]:
@@ -180,25 +211,86 @@ Always wrap your JSON response in ```json``` code blocks."""
             Parsed action data or None if parsing failed.
         """
         try:
-            # Look for JSON in code blocks
-            json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)
+            def _extract_first_json(text: str) -> Optional[Any]:
+                """Try to grab the first JSON object from possibly noisy text."""
+                decoder = json.JSONDecoder()
 
-            if json_match:
-                json_str = json_match.group(1)
-                action_data = json.loads(json_str)
-                return action_data
+                # First try straight parsing
+                try:
+                    return json.loads(text)
+                except json.JSONDecodeError:
+                    pass
 
-            # Try parsing the entire response as JSON
-            try:
-                action_data = json.loads(response)
-                return action_data
-            except json.JSONDecodeError:
-                # Not structured JSON, treat as chat response
+                # Try newline-delimited JSON (common in streamed responses)
+                for line in text.splitlines():
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    try:
+                        return json.loads(stripped)
+                    except json.JSONDecodeError:
+                        continue
+
+                # Finally, try to decode the first object in the string
+                stripped = text.lstrip()
+                try:
+                    obj, _ = decoder.raw_decode(stripped)
+                    return obj
+                except json.JSONDecodeError:
+                    return None
+
+            def _normalize_action(obj: Any) -> Optional[Dict[str, Any]]:
+                """Normalize parsed JSON into a single action dict."""
+                if isinstance(obj, list):
+                    for item in obj:
+                        if isinstance(item, dict) and item:
+                            return item
+                    return None
+                if isinstance(obj, dict):
+                    return obj
+                return None
+
+            # Look for JSON in code blocks (prefer one containing an action)
+            matches = list(re.finditer(r'```json\s*(.*?)\s*```', response, re.DOTALL))
+            parsed_blocks: list[Dict[str, Any]] = []
+            for match in matches:
+                json_str = match.group(1)
+                obj = _extract_first_json(json_str)
+                normalized = _normalize_action(obj)
+                if normalized:
+                    parsed_blocks.append(normalized)
+
+            # Prefer the first block that includes an action
+            for block in parsed_blocks:
+                if isinstance(block, dict) and "action" in block:
+                    return block
+
+            # Fall back to the first parsed block (e.g., plan JSON without action)
+            if parsed_blocks:
                 return {
                     "action": "chat",
                     "parameters": {},
-                    "explanation": response
+                    "explanation": response.strip()
                 }
+
+            # Try parsing the entire response as JSON
+            obj = _extract_first_json(response)
+            normalized = _normalize_action(obj)
+            if normalized:
+                if "action" in normalized:
+                    return normalized
+                return {
+                    "action": "chat",
+                    "parameters": {},
+                    "explanation": response.strip()
+                }
+
+            # Not structured JSON, treat as chat response
+            return {
+                "action": "chat",
+                "parameters": {},
+                "explanation": response.strip()
+            }
 
         except Exception as e:
             logger.error(f"Failed to parse AI response: {e}")
@@ -225,6 +317,9 @@ Always wrap your JSON response in ```json``` code blocks."""
         operation = self._create_operation(action, params)
 
         if not operation:
+            if action == "clarify":
+                question = explanation or params.get("question") or "Could you clarify?"
+                return question
             return f"Unknown action: {action}"
 
         # Check permissions
@@ -274,6 +369,7 @@ Always wrap your JSON response in ```json``` code blocks."""
             "list_directory": (OperationType.DIR_LIST, "dir_path"),
             "search_files": (OperationType.FILE_SEARCH, "directory"),
             "open_url": (OperationType.BROWSER_OPEN, "url"),
+            "clarify": (OperationType.FILE_READ, "question"),  # benign placeholder
         }
 
         if action not in action_map:

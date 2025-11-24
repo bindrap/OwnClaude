@@ -15,6 +15,7 @@ import argparse
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.key_binding import KeyBindings
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
@@ -47,6 +48,8 @@ class OwnClaude:
         self.conversation_history: List[Dict[str, Any]] = []
         self.current_plan: Optional[Dict[str, Any]] = None
         self.session_context: Dict[str, Any] = {}
+        self.show_task_plan: bool = True
+        self.exit_requested: bool = False
 
     def initialize(self) -> bool:
         """Initialize the application.
@@ -130,10 +133,12 @@ Create a structured plan with:
 3. Potential Risks: Any safety concerns or edge cases
 4. Expected Outcome: What success looks like
 5. Required Tools: What system tools or commands might be needed
+6. Approach: Brief reasoning path you will follow (knowledge sources, checks, or shortcuts)
 
 Format your response as JSON:
 {{
     "goal_analysis": "...",
+    "approach": "...",
     "steps": ["step1", "step2", "..."],
     "risks": ["risk1", "risk2", "..."],
     "expected_outcome": "...",
@@ -148,6 +153,7 @@ Format your response as JSON:
             logger.warning(f"Plan generation failed: {e}")
             return {
                 "goal_analysis": "Direct execution",
+                "approach": "Use prior knowledge to answer directly.",
                 "steps": [user_input],
                 "risks": [],
                 "expected_outcome": "Task completion",
@@ -270,9 +276,26 @@ Provide:
         self._print_banner()
 
         history_file = Path.home() / ".ownclaude_history"
+        kb = KeyBindings()
+
+        @kb.add('f2')
+        def _(event) -> None:
+            """Toggle task plan display with F2 (avoid backspace conflict)."""
+            self.show_task_plan = not self.show_task_plan
+            status = "shown" if self.show_task_plan else "hidden"
+            self.console.print(f"[dim]Task plan preview {status} (F2).[/dim]")
+
+        @kb.add('c-c')
+        def _(event) -> None:
+            """Exit application on Ctrl+C."""
+            self.exit_requested = True
+            self.console.print("\n[yellow]Goodbye! 👋[/yellow]")
+            event.app.exit()
+
         session = PromptSession(
             history=FileHistory(str(history_file)),
             auto_suggest=AutoSuggestFromHistory(),
+            key_bindings=kb,
         )
 
         self.console.print("\n[cyan]Type your commands or 'help' for assistance. "
@@ -281,6 +304,8 @@ Provide:
         while True:
             try:
                 user_input = session.prompt("You: ").strip()
+                if self.exit_requested:
+                    break
                 if not user_input:
                     continue
 
@@ -309,6 +334,19 @@ Provide:
                 if user_input.lower() == 'plan':
                     self._show_current_plan()
                     continue
+                if user_input.lower() == 'plan off':
+                    self.show_task_plan = False
+                    self.console.print("[dim]Task plan preview hidden.[/dim]")
+                    continue
+                if user_input.lower() == 'plan on':
+                    self.show_task_plan = True
+                    self.console.print("[dim]Task plan preview shown.[/dim]")
+                    continue
+                if user_input.lower() == 'plan toggle':
+                    self.show_task_plan = not self.show_task_plan
+                    status = "shown" if self.show_task_plan else "hidden"
+                    self.console.print(f"[dim]Task plan preview {status}.[/dim]")
+                    continue
                 if user_input.lower().startswith('rollback'):
                     parts = user_input.split()
                     if len(parts) > 1:
@@ -333,13 +371,8 @@ Provide:
                         timestamp = datetime.now().strftime("%H:%M:%S")
                         self.console.print(f"[dim]{timestamp}[/dim]")
 
-                    self.console.print(Panel(
-                        f"**Goal**: {self.current_plan.get('goal_analysis', 'N/A')}\n"
-                        f"**Steps**: {len(self.current_plan.get('steps', []))}\n"
-                        f"**Risks**: {len(self.current_plan.get('risks', []))}",
-                        title="[bold blue]Task Plan[/bold blue]",
-                        border_style="blue"
-                    ))
+                    if self.show_task_plan:
+                        self._print_plan_preview(self.current_plan)
 
                 # Execute command
                 with self.console.status("[cyan]Thinking...[/cyan]"):
@@ -387,6 +420,72 @@ Provide:
         self.console.print(f"[dim]Using {model_type} model: {model_name}[/dim]")
         self.console.print(f"[dim]Context messages: {len(self.conversation_history)}[/dim]")
 
+    def _format_plan_steps(
+        self,
+        steps: List[Any],
+        max_steps: Optional[int] = None
+    ) -> tuple[list[str], bool]:
+        """Format plan steps into readable lines."""
+        formatted: list[str] = []
+        for idx, step in enumerate(steps):
+            if max_steps is not None and idx >= max_steps:
+                break
+            title = f"Step {idx + 1}"
+            desc = ""
+            if isinstance(step, dict):
+                title = step.get("step") or step.get("title") or step.get("name") or title
+                desc = step.get("description") or step.get("details") or ""
+            else:
+                title = str(step)
+                desc = ""
+
+            line = f"{idx + 1}. {title}"
+            if desc and desc != title:
+                line += f" — {desc}"
+            formatted.append(line)
+
+        truncated = max_steps is not None and len(steps) > max_steps
+        return formatted, truncated
+
+    def _print_plan_preview(self, plan: Dict[str, Any], show_all_steps: bool = False) -> None:
+        """Render a task plan with approach and step insight."""
+        if not plan:
+            return
+
+        goal = plan.get("goal_analysis", "N/A")
+        approach = plan.get("approach") or plan.get("analysis") or ""
+        expected = plan.get("expected_outcome", "N/A")
+        steps = plan.get("steps", [])
+        risks = plan.get("risks", [])
+        tools = plan.get("required_tools", [])
+
+        formatted_steps, truncated = self._format_plan_steps(
+            steps,
+            None if show_all_steps else 4
+        )
+
+        body_parts = [
+            f"Goal: {goal}",
+            f"Expected Outcome: {expected}",
+        ]
+        if approach:
+            body_parts.append(f"Approach: {approach}")
+        if formatted_steps:
+            body_parts.append("Steps:\n" + "\n".join(formatted_steps))
+        if truncated:
+            body_parts.append(f"...and {len(steps) - len(formatted_steps)} more step(s).")
+        if risks:
+            risk_lines = "\n".join(f"• {r}" for r in risks)
+            body_parts.append(f"Risks:\n{risk_lines}")
+        if tools:
+            body_parts.append("Tools: " + ", ".join(tools[:5]))
+
+        self.console.print(Panel(
+            "\n".join(body_parts),
+            title="[bold blue]Task Plan[/bold blue]",
+            border_style="blue"
+        ))
+
     def _show_help(self) -> None:
         """Display enhanced help information."""
         help_text = """
@@ -407,6 +506,9 @@ Special Commands
 - history: Show operation history
 - memory: Show conversation memory/context
 - plan: Show current task plan
+- F2: Toggle task plan preview on/off
+- Ctrl+C: Exit immediately
+- plan off / plan on / plan toggle: Manage task plan preview
 - diagnose <issue>: Diagnose system issues
 - review <code/file>: Review code for issues
 - rollback <id>: Rollback an operation
@@ -471,25 +573,7 @@ Examples
             self.console.print("[yellow]No active task plan.[/yellow]")
             return
 
-        plan_text = f"""
-Goal Analysis: {self.current_plan.get('goal_analysis', 'N/A')}
-Expected Outcome: {self.current_plan.get('expected_outcome', 'N/A')}
-
-Steps Required:
-"""
-        for i, step in enumerate(self.current_plan.get('steps', []), 1):
-            plan_text += f"{i}. {step}\n"
-
-        if self.current_plan.get('risks'):
-            plan_text += "\nPotential Risks:\n"
-            for risk in self.current_plan.get('risks', []):
-                plan_text += f"• {risk}\n"
-
-        self.console.print(Panel(
-            plan_text.strip(),
-            title="[bold blue]Current Task Plan[/bold blue]",
-            border_style="blue"
-        ))
+        self._print_plan_preview(self.current_plan, show_all_steps=True)
 
     def _show_history(self) -> None:
         """Display operation history."""
