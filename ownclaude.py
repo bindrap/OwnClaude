@@ -1,0 +1,619 @@
+#!/usr/bin/env python3
+"""OwnClaude - Your personal AI assistant for computer control with memory and planning."""
+
+import sys
+import json
+import subprocess
+from pathlib import Path
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent / "src"))
+
+import argparse
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from rich.console import Console
+from rich.panel import Panel
+from rich.markdown import Markdown
+from rich.table import Table
+from loguru import logger
+
+from ownclaude.core.config import ConfigManager, Config
+from ownclaude.core.ollama_client import OllamaClient
+from ownclaude.core.safety import SafetyManager
+from ownclaude.core.executor import CommandExecutor
+
+
+class OwnClaude:
+    """Main OwnClaude application with enhanced memory and planning capabilities."""
+
+    def __init__(self, config_path: Optional[Path] = None):
+        """Initialize OwnClaude.
+
+        Args:
+            config_path: Path to configuration file.
+        """
+        self.console = Console()
+        self.config_manager = ConfigManager(config_path)
+        self.config: Optional[Config] = None
+        self.ollama: Optional[OllamaClient] = None
+        self.safety: Optional[SafetyManager] = None
+        self.executor: Optional[CommandExecutor] = None
+
+        # Enhanced features
+        self.conversation_history: List[Dict[str, Any]] = []
+        self.current_plan: Optional[Dict[str, Any]] = None
+        self.session_context: Dict[str, Any] = {}
+
+    def initialize(self) -> bool:
+        """Initialize the application.
+
+        Returns:
+            True if initialization succeeded, False otherwise.
+        """
+        try:
+            # Load configuration
+            self.config = self.config_manager.load()
+
+            # Setup logging
+            self._setup_logging()
+
+            # Initialize components
+            self.ollama = OllamaClient(self.config)
+            self.safety = SafetyManager(self.config)
+            self.executor = CommandExecutor(self.config, self.ollama, self.safety)
+
+            # Check Ollama connection
+            self.console.print("[yellow]Checking connection to Ollama...[/yellow]")
+            if not self.ollama.check_connection():
+                self.console.print("[red]Failed to connect to Ollama![/red]")
+                self.console.print(
+                    "[yellow]Please ensure Ollama is running. "
+                    "Run 'ollama serve' if using local model.[/yellow]"
+                )
+                return False
+
+            self.console.print("[green]✓ Connected to Ollama[/green]")
+            return True
+
+        except FileNotFoundError as e:
+            self.console.print(f"[red]Error: {e}[/red]")
+            self.console.print(
+                "[yellow]Run 'python ownclaude.py --init-config' to create a default configuration.[/yellow]"
+            )
+            return False
+        except Exception as e:
+            self.console.print(f"[red]Initialization failed: {e}[/red]")
+            logger.exception("Initialization error")
+            return False
+
+    def _setup_logging(self) -> None:
+        """Setup logging configuration."""
+        log_config = self.config.logging
+
+        # Remove default handler
+        logger.remove()
+
+        # Add file handler
+        log_file = Path(log_config.file)
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+
+        logger.add(
+            log_file,
+            level=log_config.level,
+            rotation=f"{log_config.max_size_mb} MB",
+            retention=log_config.backup_count,
+            format="{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}"
+        )
+
+        # Add console handler for errors
+        logger.add(
+            sys.stderr,
+            level="ERROR",
+            format="<red>{level}</red>: {message}"
+        )
+
+    def _plan_task(self, user_input: str) -> Dict[str, Any]:
+        """Generate a task plan before execution."""
+        self.console.print("[cyan]Creating task plan...[/cyan]")
+
+        planning_prompt = f"""
+You are an AI assistant that creates detailed plans before executing tasks.
+Given this request: "{user_input}"
+
+Create a structured plan with:
+1. Goal Analysis: What exactly needs to be accomplished?
+2. Steps Required: Break down into specific actionable steps
+3. Potential Risks: Any safety concerns or edge cases
+4. Expected Outcome: What success looks like
+5. Required Tools: What system tools or commands might be needed
+
+Format your response as JSON:
+{{
+    "goal_analysis": "...",
+    "steps": ["step1", "step2", "..."],
+    "risks": ["risk1", "risk2", "..."],
+    "expected_outcome": "...",
+    "required_tools": ["tool1", "tool2", "..."]
+}}
+"""
+
+        try:
+            plan_response = self.ollama.chat(planning_prompt)
+            return json.loads(plan_response)
+        except Exception as e:
+            logger.warning(f"Plan generation failed: {e}")
+            return {
+                "goal_analysis": "Direct execution",
+                "steps": [user_input],
+                "risks": [],
+                "expected_outcome": "Task completion",
+                "required_tools": []
+            }
+
+    def _diagnose_issue(self, problem_description: str) -> str:
+        """Diagnose computer issues and suggest solutions."""
+        self.console.print("[cyan]Analyzing system issue...[/cyan]")
+
+        diagnostic_prompt = f"""
+You are a system administrator and developer. Diagnose this issue:
+
+"{problem_description}"
+
+Provide:
+1. Likely causes
+2. Diagnostic commands to run
+3. Step-by-step solutions
+4. Prevention measures
+
+Format your response clearly with headers and bullet points.
+"""
+
+        return self.ollama.chat(diagnostic_prompt)
+
+    def _review_code(self, code: str, language: str = "python", task: str = "") -> str:
+        """Perform code review with security and best practices."""
+        self.console.print("[cyan]Reviewing code...[/cyan]")
+
+        review_prompt = f"""
+Review this {language} code for:
+1. Security vulnerabilities
+2. Best practices
+3. Performance issues
+4. Maintainability
+5. Error handling
+6. Code clarity and documentation
+
+{"Task context: " + task if task else ""}
+
+Code:
+```{language}
+{code}
+```
+
+Provide specific suggestions for improvement with examples.
+"""
+        return self.ollama.chat(review_prompt)
+
+    def _analyze_code_issues(self, code: str, error: Optional[str] = None) -> str:
+        """Analyze code and suggest fixes."""
+        self.console.print("[cyan]Analyzing code issues...[/cyan]")
+
+        prompt = f"""
+Analyze this code and identify issues:
+
+{code}
+{"Error message: " + error if error else ""}
+
+Provide:
+- Issues found with line numbers
+- Specific fixes with code examples
+- Best practices improvements
+- Security considerations
+- Performance optimizations
+"""
+        return self.ollama.chat(prompt)
+
+    def _execute_diagnostics(self, commands: List[str]) -> Dict[str, Any]:
+        """Safely execute diagnostic commands and return results."""
+        self.console.print("[cyan]Running diagnostics...[/cyan]")
+        results: Dict[str, Any] = {}
+
+        for cmd in commands:
+            try:
+                if self._is_safe_diagnostic(cmd):
+                    result = subprocess.run(
+                        cmd,
+                        shell=True,
+                        capture_output=True,
+                        text=True,
+                        timeout=30
+                    )
+                    results[cmd] = {
+                        "stdout": result.stdout,
+                        "stderr": result.stderr,
+                        "returncode": result.returncode
+                    }
+                else:
+                    results[cmd] = {"error": "Command not allowed for security reasons"}
+            except Exception as e:
+                results[cmd] = {"error": str(e)}
+        return results
+
+    def _is_safe_diagnostic(self, command: str) -> bool:
+        """Check if a diagnostic command is safe to execute."""
+        safe_commands = [
+            "dir", "ls", "ps", "top", "df", "du", "netstat", "ping",
+            "tasklist", "systeminfo", "wmic", "get-process", "get-service"
+        ]
+
+        command_lower = command.lower().strip()
+        return any(cmd in command_lower for cmd in safe_commands)
+
+    def _update_conversation_history(self, role: str, content: str) -> None:
+        """Add message to conversation history with context management."""
+        self.conversation_history.append({
+            "role": role,
+            "content": content,
+            "timestamp": datetime.now().isoformat()
+        })
+
+        max_messages = getattr(self.config.features, "max_context_messages", 20)
+        if len(self.conversation_history) > max_messages:
+            self.conversation_history = self.conversation_history[-max_messages:]
+
+    def run(self) -> None:
+        """Run the interactive CLI with enhanced capabilities."""
+        self._print_banner()
+
+        history_file = Path.home() / ".ownclaude_history"
+        session = PromptSession(
+            history=FileHistory(str(history_file)),
+            auto_suggest=AutoSuggestFromHistory(),
+        )
+
+        self.console.print("\n[cyan]Type your commands or 'help' for assistance. "
+                          "Type 'exit' or 'quit' to leave.[/cyan]\n")
+
+        while True:
+            try:
+                user_input = session.prompt("You: ").strip()
+                if not user_input:
+                    continue
+
+                self._update_conversation_history("user", user_input)
+
+                # Special commands
+                if user_input.lower() in ['exit', 'quit', 'q']:
+                    self.console.print("\n[yellow]Goodbye! 👋[/yellow]")
+                    break
+                if user_input.lower() == 'help':
+                    self._show_help()
+                    continue
+                if user_input.lower() == 'clear':
+                    self.console.clear()
+                    self._print_banner()
+                    continue
+                if user_input.lower() == 'history':
+                    self._show_history()
+                    continue
+                if user_input.lower() == 'status':
+                    self._show_status()
+                    continue
+                if user_input.lower() == 'memory':
+                    self._show_memory()
+                    continue
+                if user_input.lower() == 'plan':
+                    self._show_current_plan()
+                    continue
+                if user_input.lower().startswith('rollback'):
+                    parts = user_input.split()
+                    if len(parts) > 1:
+                        self._rollback_operation(parts[1])
+                    else:
+                        self.console.print("[red]Usage: rollback <operation_id>[/red]")
+                    continue
+                if user_input.lower().startswith('diagnose'):
+                    problem = user_input[9:].strip()
+                    self._handle_diagnosis(problem)
+                    continue
+                if user_input.lower().startswith('review'):
+                    self._handle_code_review(user_input)
+                    continue
+
+                # Plan task if enabled
+                if getattr(self.config.features, "enable_task_planning", True):
+                    with self.console.status("[cyan]Planning task...[/cyan]"):
+                        self.current_plan = self._plan_task(user_input)
+
+                    if self.config.interface.show_timestamps:
+                        timestamp = datetime.now().strftime("%H:%M:%S")
+                        self.console.print(f"[dim]{timestamp}[/dim]")
+
+                    self.console.print(Panel(
+                        f"**Goal**: {self.current_plan.get('goal_analysis', 'N/A')}\n"
+                        f"**Steps**: {len(self.current_plan.get('steps', []))}\n"
+                        f"**Risks**: {len(self.current_plan.get('risks', []))}",
+                        title="[bold blue]Task Plan[/bold blue]",
+                        border_style="blue"
+                    ))
+
+                # Execute command
+                with self.console.status("[cyan]Thinking...[/cyan]"):
+                    try:
+                        response = self.executor.execute_command(
+                            user_input,
+                            context=self.conversation_history,
+                            plan=self.current_plan
+                        )
+                    except TypeError:
+                        # Fallback for executors that don't accept extra parameters
+                        response = self.executor.execute_command(user_input)
+
+                self._update_conversation_history("assistant", response)
+
+                self.console.print(Panel(
+                    response,
+                    title="[bold cyan]OwnClaude[/bold cyan]",
+                    border_style="cyan"
+                ))
+                self.console.print()
+
+            except KeyboardInterrupt:
+                self.console.print("\n[yellow]Use 'exit' or 'quit' to leave.[/yellow]")
+            except EOFError:
+                break
+            except Exception as e:
+                self.console.print(f"[red]Error: {e}[/red]")
+                logger.exception("Runtime error")
+
+    def _print_banner(self) -> None:
+        """Print application banner."""
+        banner = """
+╔═══════════════════════════════════════════════════════════╗
+║                        OwnClaude                          ║
+║                                                           ║
+║     Your Personal AI Assistant for Computer Control       ║
+╚═══════════════════════════════════════════════════════════╝
+        """
+        self.console.print(f"[bold cyan]{banner}[/bold cyan]")
+
+        model_type = self.config.model_type
+        model_name = (self.config.ollama.local.model if model_type == "local"
+                     else self.config.ollama.cloud.model)
+        self.console.print(f"[dim]Using {model_type} model: {model_name}[/dim]")
+        self.console.print(f"[dim]Context messages: {len(self.conversation_history)}[/dim]")
+
+    def _show_help(self) -> None:
+        """Display enhanced help information."""
+        help_text = """
+OwnClaude Enhanced Help
+
+Natural Language Commands
+You can control your computer using natural language:
+- "open my email"
+- "create a Python script that prints hello world"
+- "close all browser windows"
+- "list files in the current directory"
+- "search for all Python files"
+
+Special Commands
+- help: Show this help message
+- clear: Clear the screen
+- status: Show system status and permissions
+- history: Show operation history
+- memory: Show conversation memory/context
+- plan: Show current task plan
+- diagnose <issue>: Diagnose system issues
+- review <code/file>: Review code for issues
+- rollback <id>: Rollback an operation
+- exit/quit: Exit OwnClaude
+
+Examples
+- Open applications: "open calculator", "launch Excel"
+- Open documents/folders: "open report.docx", "open the downloads folder"
+- File operations: "create a file called notes.txt", "append 'done' to todo.md", "delete temp.txt"
+- Information: "what files are in my downloads folder?"
+- Coding: "write a Python function to calculate fibonacci"
+- Diagnostics: "diagnose why my computer is slow"
+- Code review: "review the script I just created"
+"""
+        self.console.print(Panel(
+            Markdown(help_text),
+            title="[bold cyan]Enhanced Help[/bold cyan]",
+            border_style="cyan"
+        ))
+
+    def _show_status(self) -> None:
+        """Display enhanced system status."""
+        table = Table(title="System Status")
+        table.add_column("Setting", style="cyan")
+        table.add_column("Value", style="green")
+
+        perms = self.config.system_permissions
+        table.add_row("App Control", "✓ Enabled" if perms.allow_app_control else "✗ Disabled")
+        table.add_row("File Operations", "✓ Enabled" if perms.allow_file_operations else "✗ Disabled")
+        table.add_row("Browser Control", "✓ Enabled" if perms.allow_browser_control else "✗ Disabled")
+        table.add_row("System Commands", "✓ Enabled" if perms.allow_system_commands else "✗ Disabled")
+
+        features = self.config.features
+        table.add_row("Rollback", "✓ Enabled" if self.config.security.enable_rollback else "✗ Disabled")
+        table.add_row("Operation Logging", "✓ Enabled" if self.config.logging.log_operations else "✗ Disabled")
+        table.add_row("Task Planning", "✓ Enabled" if getattr(features, "enable_task_planning", True) else "✗ Disabled")
+        table.add_row("Context Memory", f"✓ {len(self.conversation_history)} messages")
+
+        self.console.print(table)
+
+    def _show_memory(self) -> None:
+        """Show conversation memory."""
+        if not self.conversation_history:
+            self.console.print("[yellow]No conversation history.[/yellow]")
+            return
+
+        table = Table(title="Conversation Memory")
+        table.add_column("Role", style="cyan")
+        table.add_column("Content", style="green")
+        table.add_column("Time", style="dim")
+
+        for msg in self.conversation_history[-15:]:
+            timestamp = msg['timestamp'].split('T')[1].split('.')[0]
+            content_preview = msg['content'][:60] + "..." if len(msg['content']) > 60 else msg['content']
+            table.add_row(msg['role'], content_preview, timestamp)
+
+        self.console.print(table)
+
+    def _show_current_plan(self) -> None:
+        """Show current task plan."""
+        if not self.current_plan:
+            self.console.print("[yellow]No active task plan.[/yellow]")
+            return
+
+        plan_text = f"""
+Goal Analysis: {self.current_plan.get('goal_analysis', 'N/A')}
+Expected Outcome: {self.current_plan.get('expected_outcome', 'N/A')}
+
+Steps Required:
+"""
+        for i, step in enumerate(self.current_plan.get('steps', []), 1):
+            plan_text += f"{i}. {step}\n"
+
+        if self.current_plan.get('risks'):
+            plan_text += "\nPotential Risks:\n"
+            for risk in self.current_plan.get('risks', []):
+                plan_text += f"• {risk}\n"
+
+        self.console.print(Panel(
+            plan_text.strip(),
+            title="[bold blue]Current Task Plan[/bold blue]",
+            border_style="blue"
+        ))
+
+    def _show_history(self) -> None:
+        """Display operation history."""
+        history = self.safety.get_operation_history()
+
+        if not history:
+            self.console.print("[yellow]No operations in history.[/yellow]")
+            return
+
+        table = Table(title="Operation History")
+        table.add_column("ID", style="cyan")
+        table.add_column("Type", style="green")
+        table.add_column("Target", style="yellow")
+        table.add_column("Time", style="dim")
+
+        for op in history[-10:]:
+            timestamp = op['timestamp'].split('T')[1].split('.')[0]
+            table.add_row(
+                op['id'][:8] + "...",
+                op['type'],
+                op['target'][:30],
+                timestamp
+            )
+
+        self.console.print(table)
+
+    def _rollback_operation(self, operation_id: str) -> None:
+        """Rollback an operation.
+
+        Args:
+            operation_id: ID of operation to rollback.
+        """
+        with self.console.status("[cyan]Rolling back operation...[/cyan]"):
+            success = self.safety.rollback_operation(operation_id)
+
+        if success:
+            self.console.print("[green]✓ Operation rolled back successfully[/green]")
+        else:
+            self.console.print("[red]✗ Failed to rollback operation[/red]")
+
+    def _handle_diagnosis(self, problem: str) -> None:
+        """Handle system diagnosis requests."""
+        if not problem:
+            self.console.print("[red]Please specify the problem to diagnose.[/red]")
+            return
+
+        with self.console.status("[cyan]Diagnosing issue...[/cyan]"):
+            diagnosis = self._diagnose_issue(problem)
+
+        self.console.print(Panel(
+            diagnosis,
+            title="[bold red]System Diagnosis[/bold red]",
+            border_style="red"
+        ))
+
+    def _handle_code_review(self, user_input: str) -> None:
+        """Handle code review requests."""
+        task_context = user_input[len("review"):].strip()
+
+        with self.console.status("[cyan]Reviewing code...[/cyan]"):
+            last_code = ""
+            for msg in reversed(self.conversation_history):
+                if msg['role'] == 'assistant' and '```' in msg['content']:
+                    last_code = msg['content']
+                    break
+
+            if last_code:
+                review = self._review_code(last_code, task=task_context)
+                self.console.print(Panel(
+                    review,
+                    title="[bold green]Code Review[/bold green]",
+                    border_style="green"
+                ))
+            else:
+                self.console.print("[yellow]No recent code found to review. Please provide code directly.[/yellow]")
+
+
+def main() -> None:
+    """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description="OwnClaude - Your personal AI assistant"
+    )
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help="Path to configuration file (default: config.json)"
+    )
+    parser.add_argument(
+        "--init-config",
+        action="store_true",
+        help="Create a default configuration file"
+    )
+
+    args = parser.parse_args()
+
+    # Handle config initialization
+    if args.init_config:
+        config_path = args.config or Path("config.json")
+        if config_path.exists():
+            print(f"Configuration file already exists: {config_path}")
+            response = input("Overwrite? (y/N): ")
+            if response.lower() != 'y':
+                print("Cancelled.")
+                return
+
+        ConfigManager.create_default_config(config_path)
+        print(f"Created configuration file: {config_path}")
+        print("Please edit the configuration file with your settings.")
+        return
+
+    app = OwnClaude(args.config)
+
+    if not app.initialize():
+        sys.exit(1)
+
+    try:
+        app.run()
+    except KeyboardInterrupt:
+        print("\nGoodbye!")
+    except Exception as e:
+        print(f"Fatal error: {e}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
