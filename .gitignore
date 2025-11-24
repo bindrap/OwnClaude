@@ -25,7 +25,9 @@ venv/
 env/
 ENV/
 .venv
-
+virtualEnv
+windowsVenv/
+W
 # IDE
 .vscode/
 .idea/

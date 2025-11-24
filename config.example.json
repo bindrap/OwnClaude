@@ -9,9 +9,9 @@
       "timeout": 30
     },
     "cloud": {
-      "api_key": "your-api-key-here",
-      "endpoint": "https://cloud.ollama.ai",
-      "model": "llama3.2",
+      "api_key": "1728cbe73f944db7afa1a3c8f52d2f41.GzEVZ8ADdcDHwIxdbvKnqbXy",
+      "endpoint": "https://ollama.com",
+      "model": "gpt-oss:120b-cloud",
       "temperature": 0.7,
       "top_p": 0.9,
       "timeout": 60

@@ -2,7 +2,7 @@
 
 import json
 import re
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 from loguru import logger
 
@@ -21,10 +21,11 @@ class CommandExecutor:
 
 Your role is to understand user requests and respond with structured actions. You can:
 1. Open and close applications
-2. Create, read, modify, and delete files
-3. Search for files and list directories
-4. Open URLs in browsers
-5. Answer questions and provide information
+2. Create, read, modify, append, and delete files (and directories)
+3. Open documents/paths with the default application
+4. Search for files and list directories
+5. Open URLs in browsers
+6. Answer questions and provide information
 
 When a user asks you to perform an action, respond with a JSON structure in this format:
 
@@ -42,14 +43,19 @@ Available actions:
 - "close_app": Close an application (params: app_name, force)
 - "create_file": Create a file (params: file_path, content)
 - "read_file": Read a file (params: file_path)
-- "modify_file": Modify a file (params: file_path, content)
+- "modify_file": Replace file content (params: file_path, content)
+- "append_file": Append to file (params: file_path, content)
 - "delete_file": Delete a file (params: file_path)
+- "open_file": Open a file or directory with the default app (params: file_path)
+- "create_directory": Create directory (params: dir_path)
+- "delete_directory": Delete directory (params: dir_path, recursive)
 - "list_directory": List directory contents (params: dir_path)
 - "search_files": Search for files (params: directory, pattern)
 - "open_url": Open a URL (params: url)
 - "chat": Just answer a question or have a conversation (no params needed)
 
 For conversational messages where no action is needed, use the "chat" action.
+If additional context or a task plan is provided, use it to pick sensible defaults (paths, filenames, tools) and prefer safer options first.
 
 Examples:
 
@@ -101,20 +107,28 @@ Always wrap your JSON response in ```json``` code blocks."""
         # Set system prompt
         self.ollama.set_system_prompt(self.SYSTEM_PROMPT)
 
-    def execute_command(self, user_input: str) -> str:
+    def execute_command(
+        self,
+        user_input: str,
+        context: Optional[list[Dict[str, Any]]] = None,
+        plan: Optional[Dict[str, Any]] = None
+    ) -> str:
         """Execute a user command.
 
         Args:
             user_input: User's natural language command.
+            context: Prior conversation for grounding.
+            plan: Optional task plan for execution hints.
 
         Returns:
             Response message to display to user.
         """
         try:
             # Get AI response
-            ai_response = self.ollama.chat(user_input)
+            ai_response = self.ollama.chat(
+                self._build_augmented_prompt(user_input, context, plan)
+            )
 
-            # Parse the response
             action_data = self._parse_ai_response(ai_response)
 
             if not action_data:
@@ -128,6 +142,33 @@ Always wrap your JSON response in ```json``` code blocks."""
         except Exception as e:
             logger.error(f"Command execution failed: {e}")
             return f"Error: {str(e)}"
+
+    def _build_augmented_prompt(
+        self,
+        user_input: str,
+        context: Optional[List[Dict[str, Any]]],
+        plan: Optional[Dict[str, Any]]
+    ) -> str:
+        """Attach light context/plan hints to the user input for the model."""
+        parts = [user_input]
+
+        if plan:
+            try:
+                plan_preview = json.dumps(plan, ensure_ascii=True)
+            except Exception:
+                plan_preview = str(plan)
+            parts.append(f"Current task plan: {plan_preview}")
+
+        if context:
+            recent = context[-6:]  # limit to keep prompt compact
+            context_lines = []
+            for item in recent:
+                role = item.get("role", "user")
+                content = item.get("content", "")
+                context_lines.append(f"{role}: {content}")
+            parts.append("Recent context:\n" + "\n".join(context_lines))
+
+        return "\n\n".join(parts)
 
     def _parse_ai_response(self, response: str) -> Optional[Dict[str, Any]]:
         """Parse AI response to extract action data.
@@ -223,9 +264,15 @@ Always wrap your JSON response in ```json``` code blocks."""
             "open_app": (OperationType.APP_OPEN, "app_name"),
             "close_app": (OperationType.APP_CLOSE, "app_name"),
             "create_file": (OperationType.FILE_CREATE, "file_path"),
+            "append_file": (OperationType.FILE_APPEND, "file_path"),
             "read_file": (OperationType.FILE_READ, "file_path"),
             "modify_file": (OperationType.FILE_MODIFY, "file_path"),
             "delete_file": (OperationType.FILE_DELETE, "file_path"),
+            "open_file": (OperationType.FILE_OPEN, "file_path"),
+            "create_directory": (OperationType.DIR_CREATE, "dir_path"),
+            "delete_directory": (OperationType.DIR_DELETE, "dir_path"),
+            "list_directory": (OperationType.DIR_LIST, "dir_path"),
+            "search_files": (OperationType.FILE_SEARCH, "directory"),
             "open_url": (OperationType.BROWSER_OPEN, "url"),
         }
 
@@ -286,9 +333,31 @@ Always wrap your JSON response in ```json``` code blocks."""
                     params["content"]
                 )
 
+            elif action == "append_file":
+                success, message, rollback_info = self.file_ops.append_file(
+                    params["file_path"],
+                    params.get("content", "")
+                )
+
             elif action == "delete_file":
                 success, message, rollback_info = self.file_ops.delete_file(
                     params["file_path"]
+                )
+
+            elif action == "open_file":
+                success, message = self.app_controller.open_file_with_default_app(
+                    params["file_path"]
+                )
+
+            elif action == "create_directory":
+                success, message = self.file_ops.create_directory(
+                    params["dir_path"]
+                )
+
+            elif action == "delete_directory":
+                success, message = self.file_ops.delete_directory(
+                    params["dir_path"],
+                    params.get("recursive", False)
                 )
 
             elif action == "list_directory":
@@ -304,8 +373,8 @@ Always wrap your JSON response in ```json``` code blocks."""
 
             elif action == "search_files":
                 success, message, matches = self.file_ops.search_files(
-                    params["directory"],
-                    params["pattern"]
+                    params.get("directory", params.get("dir_path", ".")),
+                    params.get("pattern", "*")
                 )
                 if success and matches:
                     message = f"Found files:\n" + "\n".join(matches)

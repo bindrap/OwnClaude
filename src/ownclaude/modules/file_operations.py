@@ -113,6 +113,43 @@ class FileOperations:
             logger.error(f"Failed to modify file {file_path}: {e}")
             return False, str(e), None
 
+    def append_file(
+        self,
+        file_path: str,
+        content: str
+    ) -> tuple[bool, str, Optional[Dict[str, Any]]]:
+        """Append content to an existing file (creates if missing).
+
+        Args:
+            file_path: Path to the file to append to.
+            content: Content to append.
+
+        Returns:
+            Tuple of (success, message, rollback_info).
+        """
+        path = Path(file_path)
+
+        try:
+            original_content = ""
+            if path.exists():
+                original_content = path.read_text(encoding='utf-8')
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(content)
+
+            logger.info(f"Appended to file: {file_path}")
+            rollback_info = {
+                "path": str(path),
+                "original_content": original_content
+            }
+            return True, f"Appended content to {file_path}", rollback_info
+
+        except Exception as e:
+            logger.error(f"Failed to append file {file_path}: {e}")
+            return False, str(e), None
+
     def delete_file(self, file_path: str) -> tuple[bool, str, Optional[Dict[str, Any]]]:
         """Delete a file.
 

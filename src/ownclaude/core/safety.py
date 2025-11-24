@@ -17,9 +17,15 @@ class OperationType(Enum):
     APP_OPEN = "app_open"
     APP_CLOSE = "app_close"
     FILE_CREATE = "file_create"
+    FILE_APPEND = "file_append"
     FILE_MODIFY = "file_modify"
     FILE_DELETE = "file_delete"
     FILE_READ = "file_read"
+    FILE_OPEN = "file_open"
+    FILE_SEARCH = "file_search"
+    DIR_CREATE = "dir_create"
+    DIR_DELETE = "dir_delete"
+    DIR_LIST = "dir_list"
     BROWSER_OPEN = "browser_open"
     BROWSER_CLOSE = "browser_close"
     SYSTEM_COMMAND = "system_command"
@@ -143,7 +149,10 @@ class RollbackManager:
                     logger.info(f"Rolled back file deletion: {file_path}")
                     return True
 
-            elif operation.operation_type == OperationType.FILE_MODIFY:
+            elif operation.operation_type in (
+                OperationType.FILE_MODIFY,
+                OperationType.FILE_APPEND
+            ):
                 # Restore previous content
                 original_content = rollback_info.get('original_content')
                 if original_content:
@@ -210,9 +219,15 @@ class SafetyManager:
 
         elif operation.operation_type in [
             OperationType.FILE_CREATE,
+            OperationType.FILE_APPEND,
             OperationType.FILE_MODIFY,
             OperationType.FILE_DELETE,
-            OperationType.FILE_READ
+            OperationType.FILE_READ,
+            OperationType.FILE_OPEN,
+            OperationType.FILE_SEARCH,
+            OperationType.DIR_CREATE,
+            OperationType.DIR_DELETE,
+            OperationType.DIR_LIST
         ]:
             if not self.permissions.allow_file_operations:
                 return False, "File operations are disabled"
@@ -248,13 +263,16 @@ class SafetyManager:
         if operation.operation_type == OperationType.FILE_DELETE:
             return confirmations.file_deletion
 
+        elif operation.operation_type == OperationType.DIR_DELETE:
+            return confirmations.file_deletion
+
         elif operation.operation_type == OperationType.APP_CLOSE:
             return confirmations.app_closure
 
         elif operation.operation_type == OperationType.SYSTEM_COMMAND:
             return confirmations.system_commands
 
-        elif operation.operation_type == OperationType.FILE_MODIFY:
+        elif operation.operation_type in (OperationType.FILE_MODIFY, OperationType.FILE_APPEND):
             return confirmations.file_modification
 
         return False
