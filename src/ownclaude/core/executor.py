@@ -101,6 +101,13 @@ User: "who was the first president?"
     "explanation": "George Washington was the first President of the United States, serving from 1789 to 1797."
 }
 
+User: "what's a good program to build 3D models and easy way to learn?"
+{
+    "action": "chat",
+    "parameters": {},
+    "explanation": "For 3D modeling, I recommend **Blender** (free, open-source, very powerful) as the best option for beginners. It has excellent free tutorials on YouTube (Blender Guru's 'Donut Tutorial' series) and official documentation. Other good options: **Tinkercad** (web-based, extremely simple for beginners), **SketchUp** (good for architectural modeling), and **Maya/3ds Max** (industry standard but expensive). Start with Blender - it's free and has the largest learning community."
+}
+
 User: "create a file called test.txt with hello world"
 {
     "action": "create_file",
@@ -155,6 +162,9 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
         self.code_search = CodeSearch()
         self.git = GitIntegration()
 
+        # Track last user input for validation
+        self.last_user_input = ""
+
         # Set system prompt
         self.ollama.set_system_prompt(self.SYSTEM_PROMPT)
 
@@ -175,6 +185,9 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
             Response message to display to user.
         """
         try:
+            # Store user input for validation
+            self.last_user_input = user_input.lower()
+
             # Get AI response
             ai_response = self.ollama.chat(
                 self._build_augmented_prompt(user_input, context, plan)
@@ -582,6 +595,18 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
                     message = f"Found files:\n" + "\n".join(matches)
 
             elif action == "open_url":
+                # Validate that user explicitly asked to open a URL
+                url_keywords = ["open", "browse", "go to", "visit", "show me", "navigate to"]
+                user_wants_url = any(keyword in self.last_user_input for keyword in url_keywords)
+
+                if not user_wants_url:
+                    # User didn't ask to open a URL, they asked a question
+                    return (
+                        "I should answer your question directly instead of opening a browser. "
+                        "Please ask me again and I'll provide a proper answer. "
+                        "(If you specifically want me to open a website, use words like 'open', 'browse to', or 'visit')"
+                    )
+
                 success, message = self.app_controller.open_url(params["url"])
 
             # New enhanced actions
