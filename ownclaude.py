@@ -4,6 +4,7 @@
 import sys
 import json
 import subprocess
+import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -412,6 +413,9 @@ Provide:
                     self._handle_code_review(user_input)
                     continue
 
+                # Start timing
+                start_time = time.time()
+
                 # Plan task if enabled
                 if getattr(self.config.features, "enable_task_planning", True):
                     with self.console.status("[cyan]Planning task...[/cyan]"):
@@ -436,11 +440,20 @@ Provide:
                         # Fallback for executors that don't accept extra parameters
                         response = self.executor.execute_command(user_input)
 
+                # Calculate elapsed time
+                elapsed_time = time.time() - start_time
+
                 self._update_conversation_history("assistant", response)
+
+                # Format elapsed time nicely
+                if elapsed_time < 1:
+                    time_str = f"{elapsed_time*1000:.0f}ms"
+                else:
+                    time_str = f"{elapsed_time:.2f}s"
 
                 self.console.print(Panel(
                     response,
-                    title="[bold cyan]OwnClaude[/bold cyan]",
+                    title=f"[bold cyan]OwnClaude[/bold cyan] [dim]({time_str})[/dim]",
                     border_style="cyan"
                 ))
                 self.console.print()
@@ -670,12 +683,16 @@ Examples
             self.console.print("[red]Please specify the problem to diagnose.[/red]")
             return
 
+        start_time = time.time()
         with self.console.status("[cyan]Diagnosing issue...[/cyan]"):
             diagnosis = self._diagnose_issue(problem)
+        elapsed_time = time.time() - start_time
+
+        time_str = f"{elapsed_time*1000:.0f}ms" if elapsed_time < 1 else f"{elapsed_time:.2f}s"
 
         self.console.print(Panel(
             diagnosis,
-            title="[bold red]System Diagnosis[/bold red]",
+            title=f"[bold red]System Diagnosis[/bold red] [dim]({time_str})[/dim]",
             border_style="red"
         ))
 
@@ -683,6 +700,7 @@ Examples
         """Handle code review requests."""
         task_context = user_input[len("review"):].strip()
 
+        start_time = time.time()
         with self.console.status("[cyan]Reviewing code...[/cyan]"):
             last_code = ""
             for msg in reversed(self.conversation_history):
@@ -692,9 +710,12 @@ Examples
 
             if last_code:
                 review = self._review_code(last_code, task=task_context)
+                elapsed_time = time.time() - start_time
+                time_str = f"{elapsed_time*1000:.0f}ms" if elapsed_time < 1 else f"{elapsed_time:.2f}s"
+
                 self.console.print(Panel(
                     review,
-                    title="[bold green]Code Review[/bold green]",
+                    title=f"[bold green]Code Review[/bold green] [dim]({time_str})[/dim]",
                     border_style="green"
                 ))
             else:
