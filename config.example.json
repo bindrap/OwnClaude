@@ -1,15 +1,18 @@
 {
+  "_comment_model": "IMPORTANT: Use llama3.1:8b or larger! Small models (3b) don't work well. See MODEL_GUIDE.md",
   "model_type": "local",
   "ollama": {
     "local": {
       "host": "http://localhost:11434",
-      "model": "llama3.2",
+      "model": "llama3.1:8b",
+      "_comment_model_options": "Recommended: llama3.1:8b, mistral:7b, qwen2.5:7b, deepseek-coder:6.7b",
+      "_comment_avoid": "AVOID: llama3.2:3b (too small, doesn't follow instructions)",
       "temperature": 0.7,
       "top_p": 0.9,
       "timeout": 30
     },
     "cloud": {
-      "api_key": "1728cbe73f944db7afa1a3c8f52d2f41.GzEVZ8ADdcDHwIxdbvKnqbXy",
+      "api_key": "your-api-key-here",
       "endpoint": "https://ollama.com",
       "model": "gpt-oss:120b-cloud",
       "temperature": 0.7,

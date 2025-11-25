@@ -34,10 +34,11 @@ Your role is to understand user requests and respond with exactly one structured
 7. Analyze project structure and provide context
 8. Ask clarifying questions when needed
 
-CRITICAL RULES:
-1. For factual questions (like "who is X", "what is Y", "how fast did Z"), ALWAYS use the "chat" action to answer directly. NEVER open URLs or applications for factual questions.
-2. File paths MUST be in the current working directory. NEVER use "../" or parent directory references unless the user explicitly provides them. Always use simple filenames like "test.txt" not "../test.txt".
-3. Only use "open_url" when the user explicitly asks to open a website or URL.
+CRITICAL RULES (YOU MUST FOLLOW THESE):
+1. **ANSWER QUESTIONS DIRECTLY**: For ANY factual question (like "when did Russia...", "who is X", "what is Y", "how does Z work"), YOU MUST use the "chat" action and provide a complete answer in the explanation field. DO NOT use "open_url", DO NOT search online, DO NOT open Wikipedia. Just answer the question with what you know.
+2. **NO EMPTY RESPONSES**: When using "chat" action, the explanation field MUST contain the actual answer (at least 50 characters). DO NOT put placeholder text like "Providing an answer" or "Let me explain". Put the ACTUAL ANSWER.
+3. **FILE PATHS**: File paths MUST be in the current working directory. NEVER use "../" or parent directory references. Always use simple filenames like "test.txt" not "../test.txt".
+4. **URLS ONLY WHEN ASKED**: Only use "open_url" when the user EXPLICITLY says "open this website" or "go to URL". NOT for answering questions.
 
 When a user asks you to perform an action, respond with a single JSON object in this format. Do not include multiple JSON objects or any text outside the code block.
 
@@ -336,6 +337,39 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
             logger.error(f"Failed to parse AI response: {e}")
             return None
 
+    def _validate_response_content(self, action: str, explanation: str) -> tuple[bool, str]:
+        """Validate that a response has actual content.
+
+        Args:
+            action: The action type.
+            explanation: The explanation text.
+
+        Returns:
+            Tuple of (is_valid, error_or_explanation).
+        """
+        # For chat actions, ensure there's actual content
+        if action == "chat":
+            # Check if explanation is empty or just a placeholder
+            if not explanation or len(explanation.strip()) < 10:
+                return False, "The AI response was empty. Please try rephrasing your question or use a better model."
+
+            # Check for common placeholder phrases that indicate no real answer
+            placeholder_phrases = [
+                "providing an answer",
+                "let me answer",
+                "i'll explain",
+                "here's the answer",
+                "opening",
+                "searching for"
+            ]
+
+            explanation_lower = explanation.lower()
+            # If it's very short and contains only placeholder text, it's invalid
+            if len(explanation) < 50 and any(phrase in explanation_lower for phrase in placeholder_phrases):
+                return False, "The AI didn't provide a complete answer. Please try: 1) Rephrasing your question, 2) Using a larger model (llama3.1:8b recommended), or 3) Being more specific."
+
+        return True, explanation
+
     def _execute_action(self, action_data: Dict[str, Any]) -> str:
         """Execute a specific action.
 
@@ -348,6 +382,11 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
         action = action_data.get("action")
         params = action_data.get("parameters", {})
         explanation = action_data.get("explanation", "")
+
+        # Validate response content
+        is_valid, result = self._validate_response_content(action, explanation)
+        if not is_valid:
+            return result
 
         # Handle chat action
         if action == "chat":

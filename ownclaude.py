@@ -80,6 +80,10 @@ class OwnClaude:
                 return False
 
             self.console.print("[green]✓ Connected to Ollama[/green]")
+
+            # Warn about small models
+            self._check_model_quality()
+
             return True
 
         except FileNotFoundError as e:
@@ -118,6 +122,47 @@ class OwnClaude:
             level="ERROR",
             format="<red>{level}</red>: {message}"
         )
+
+    def _check_model_quality(self) -> None:
+        """Check if the model is suitable and warn if not."""
+        model_name = self.config.ollama.local.model if self.config.model_type == "local" else self.config.ollama.cloud.model
+
+        # Models known to be too small
+        small_models = ["3b", ":3b", "tiny", "mini"]
+        is_small = any(marker in model_name.lower() for marker in small_models)
+
+        # Recommended models
+        good_models = ["llama3.1:8b", "mistral:7b", "qwen2.5:7b", "deepseek-coder", ":8b", ":7b", "13b", "70b"]
+        is_good = any(marker in model_name.lower() for marker in good_models)
+
+        if is_small:
+            self.console.print()
+            self.console.print("[bold red]⚠️  WARNING: Small Model Detected![/bold red]")
+            self.console.print(f"[yellow]You're using: {model_name}[/yellow]")
+            self.console.print("[yellow]Small models (<5B parameters) often:[/yellow]")
+            self.console.print("[yellow]  • Open URLs instead of answering questions[/yellow]")
+            self.console.print("[yellow]  • Provide empty or incomplete responses[/yellow]")
+            self.console.print("[yellow]  • Don't follow instructions properly[/yellow]")
+            self.console.print()
+            self.console.print("[bold green]RECOMMENDED: Switch to llama3.1:8b or larger[/bold green]")
+            self.console.print("[cyan]Quick fix:[/cyan]")
+            self.console.print("[cyan]  1. Run: ollama pull llama3.1:8b[/cyan]")
+            self.console.print("[cyan]  2. Edit config.json: \"model\": \"llama3.1:8b\"[/cyan]")
+            self.console.print("[cyan]  3. Restart OwnClaude[/cyan]")
+            self.console.print()
+            self.console.print("[dim]See MODEL_GUIDE.md for more details[/dim]")
+            self.console.print()
+
+            # Pause to let user see the warning
+            import time
+            time.sleep(3)
+
+        elif not is_good and self.config.model_type == "local":
+            self.console.print()
+            self.console.print(f"[yellow]ℹ️  Using model: {model_name}[/yellow]")
+            self.console.print("[yellow]For best results, we recommend llama3.1:8b or mistral:7b[/yellow]")
+            self.console.print("[dim]See MODEL_GUIDE.md for recommendations[/dim]")
+            self.console.print()
 
     def _plan_task(self, user_input: str) -> Dict[str, Any]:
         """Generate a task plan before execution."""
@@ -303,9 +348,14 @@ Provide:
 
         while True:
             try:
-                user_input = session.prompt("You: ").strip()
-                if self.exit_requested:
+                user_input = session.prompt("You: ")
+
+                # Handle Ctrl+C or None input
+                if user_input is None or self.exit_requested:
+                    self.console.print("\n[yellow]Goodbye! 👋[/yellow]")
                     break
+
+                user_input = user_input.strip()
                 if not user_input:
                     continue
 
