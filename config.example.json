@@ -58,6 +58,11 @@
     "enable_voice_input": false,
     "enable_auto_completion": true,
     "enable_context_awareness": true,
-    "max_context_messages": 20
+    "enable_task_planning": true,
+    "enable_code_analysis": true,
+    "enable_git_integration": true,
+    "max_context_messages": 20,
+    "project_scan_depth": 5,
+    "code_search_max_results": 50
   }
 }

@@ -12,22 +12,28 @@ from .ollama_client import OllamaClient
 from .safety import SafetyManager, Operation, OperationType
 from ..modules.app_control import AppController
 from ..modules.file_operations import FileOperations
+from ..modules.context_manager import ProjectContext
+from ..modules.terminal_executor import TerminalExecutor
+from ..modules.code_search import CodeSearch
+from ..modules.git_integration import GitIntegration
 
 
 class CommandExecutor:
     """Executes commands based on AI interpretation."""
 
     # System prompt for the AI
-    SYSTEM_PROMPT = """You are OwnClaude, a helpful AI assistant that helps users control their computer through natural language commands.
+    SYSTEM_PROMPT = """You are OwnClaude, a powerful AI assistant that helps users control their computer and work with code through natural language commands.
 
 Your role is to understand user requests and respond with exactly one structured action. You can:
 1. Open and close applications
 2. Create, read, modify, append, and delete files (and directories)
-3. Open documents/paths with the default application
-4. Search for files and list directories
-5. Open URLs in browsers
-6. Answer questions and provide information
-7. Ask a quick clarifying question when needed (use the \"clarify\" action)
+3. Execute terminal commands, run tests, and build projects
+4. Search code (grep), find definitions, and navigate codebases
+5. Git operations (status, commit, branch, diff)
+6. Analyze project structure and provide context
+7. Open documents/paths and URLs
+8. Answer questions and provide information
+9. Ask clarifying questions when needed
 
 When a user asks you to perform an action, respond with a single JSON object in this format. Do not include multiple JSON objects or any text outside the code block.
 
@@ -48,6 +54,16 @@ Available actions:
 - "modify_file": Replace file content (params: file_path, content)
 - "append_file": Append to file (params: file_path, content)
 - "delete_file": Delete a file (params: file_path)
+- "run_command": Execute a terminal command (params: command)
+- "run_tests": Run project tests (params: test_command optional)
+- "run_build": Build the project (params: build_command optional)
+- "search_code": Search for code patterns (params: pattern, file_pattern optional)
+- "find_definition": Find function/class definition (params: name, type optional)
+- "get_project_summary": Get project structure summary (no params)
+- "git_status": Get git repository status (no params)
+- "git_diff": Get git diff (params: staged optional)
+- "git_commit": Create a git commit (params: message)
+- "analyze_file": Analyze a code file (params: file_path)
 - "open_file": Open a file or directory with the default app (params: file_path)
 - "create_directory": Create directory (params: dir_path)
 - "delete_directory": Delete directory (params: dir_path, recursive)
@@ -116,6 +132,12 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
         self.safety = safety_manager
         self.app_controller = AppController()
         self.file_ops = FileOperations()
+
+        # Initialize new enhanced modules
+        self.project_context = ProjectContext()
+        self.terminal_executor = TerminalExecutor()
+        self.code_search = CodeSearch()
+        self.git = GitIntegration()
 
         # Set system prompt
         self.ollama.set_system_prompt(self.SYSTEM_PROMPT)
@@ -477,6 +499,119 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
 
             elif action == "open_url":
                 success, message = self.app_controller.open_url(params["url"])
+
+            # New enhanced actions
+            elif action == "run_command":
+                result = self.terminal_executor.execute(params["command"])
+                success = result.success
+                if result.stdout:
+                    message = f"Command output:\n{result.stdout}"
+                elif result.stderr:
+                    message = f"Command error:\n{result.stderr}"
+                else:
+                    message = "Command executed successfully (no output)"
+
+            elif action == "run_tests":
+                result = self.terminal_executor.run_tests(params.get("test_command"))
+                success = result.success
+                message = f"Tests {'passed' if success else 'failed'}:\n{result.stdout}\n{result.stderr}"
+
+            elif action == "run_build":
+                result = self.terminal_executor.run_build(params.get("build_command"))
+                success = result.success
+                message = f"Build {'succeeded' if success else 'failed'}:\n{result.stdout}\n{result.stderr}"
+
+            elif action == "search_code":
+                matches = self.code_search.grep(
+                    params["pattern"],
+                    file_pattern=params.get("file_pattern", "*"),
+                    context_lines=params.get("context_lines", 2),
+                    max_results=params.get("max_results", 20)
+                )
+                success = True
+                if matches:
+                    formatted = []
+                    for match in matches:
+                        formatted.append(f"{match.file_path}:{match.line_number}: {match.line_content}")
+                    message = f"Found {len(matches)} matches:\n" + "\n".join(formatted[:20])
+                else:
+                    message = "No matches found"
+
+            elif action == "find_definition":
+                definitions = self.code_search.find_definition(
+                    params["name"],
+                    def_type=params.get("type")
+                )
+                success = True
+                if definitions:
+                    formatted = []
+                    for defn in definitions:
+                        formatted.append(f"{defn.file_path}:{defn.line_number} - {defn.type} {defn.name}")
+                        if defn.signature:
+                            formatted.append(f"  {defn.signature}")
+                    message = f"Found {len(definitions)} definition(s):\n" + "\n".join(formatted)
+                else:
+                    message = f"No definition found for '{params['name']}'"
+
+            elif action == "get_project_summary":
+                if not self.project_context._initialized:
+                    self.project_context.initialize()
+                summary = self.project_context.get_project_summary()
+                success = True
+                message = f"Project Summary:\n{summary}"
+
+            elif action == "git_status":
+                status = self.git.get_status()
+                success = status is not None
+                if status:
+                    lines = [
+                        f"Branch: {status.branch}",
+                        f"Staged files: {len(status.staged)}",
+                        f"Unstaged files: {len(status.unstaged)}",
+                        f"Untracked files: {len(status.untracked)}",
+                    ]
+                    if status.staged:
+                        lines.append("\nStaged:")
+                        lines.extend([f"  - {f}" for f in status.staged[:10]])
+                    if status.unstaged:
+                        lines.append("\nUnstaged:")
+                        lines.extend([f"  - {f}" for f in status.unstaged[:10]])
+                    message = "\n".join(lines)
+                else:
+                    message = "Not a git repository"
+
+            elif action == "git_diff":
+                diff = self.git.get_diff(staged=params.get("staged", False))
+                success = True
+                if diff:
+                    message = f"Git diff:\n{diff[:2000]}"  # Limit to 2000 chars
+                else:
+                    message = "No changes to show"
+
+            elif action == "git_commit":
+                success, msg = self.git.commit(params["message"])
+                message = msg
+
+            elif action == "analyze_file":
+                file_path = Path(params["file_path"])
+                if file_path.suffix == '.py':
+                    analysis = self.project_context.analyze_python_file(file_path)
+                    success = True
+                    lines = [f"Analysis of {file_path.name}:"]
+                    if analysis.get('docstring'):
+                        lines.append(f"\nDocstring: {analysis['docstring']}")
+                    if analysis.get('classes'):
+                        lines.append(f"\nClasses ({len(analysis['classes'])}):")
+                        for cls in analysis['classes'][:5]:
+                            lines.append(f"  - {cls['name']} (line {cls['line']})")
+                    if analysis.get('functions'):
+                        lines.append(f"\nFunctions ({len(analysis['functions'])}):")
+                        for func in analysis['functions'][:5]:
+                            lines.append(f"  - {func['name']} (line {func['line']})")
+                    message = "\n".join(lines)
+                else:
+                    success = False
+                    message = f"File analysis not supported for {file_path.suffix} files yet"
 
             else:
                 success = False
