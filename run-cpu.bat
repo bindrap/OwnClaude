@@ -1,30 +1,31 @@
 @echo off
-REM OwnClaude GPU-Optimized Launcher
-REM This prevents CUDA out-of-memory errors on 4GB GPUs
+REM OwnClaude CPU-Only Launcher
+REM For when GPU causes issues or you need maximum stability
 
 echo ========================================
-echo   OwnClaude GPU-Optimized Launcher
+echo   OwnClaude CPU-Only Launcher
 echo ========================================
 echo.
-echo Configuring Ollama for 4GB GPU...
+echo Configuring Ollama for CPU-only mode...
 
 REM Stop existing Ollama instance
 echo Stopping existing Ollama server...
 taskkill /F /IM ollama.exe >nul 2>&1
 timeout /t 2 /nobreak >nul
 
-REM Set environment variables for Ollama (SAFE for 4GB GPU)
+REM Set environment variables for CPU-only mode
 set OLLAMA_NUM_CTX=2048
-set OLLAMA_NUM_GPU=6
+set OLLAMA_NUM_GPU=0
 set OLLAMA_NUM_PARALLEL=1
+set OLLAMA_NUM_THREAD=8
 
-echo ✓ Context: 2048 tokens (reduced from 4096)
-echo ✓ GPU Layers: 6 of 32 (SAFE for 4GB GPU)
-echo ✓ Memory optimized for 4GB GPU
+echo ✓ Context: 2048 tokens
+echo ✓ GPU Layers: 0 (CPU only)
+echo ✓ Threads: 8 (optimized for multi-core CPU)
 echo.
-echo Starting Ollama server with optimized settings...
+echo Starting Ollama server in CPU mode...
 
-REM Start Ollama server in background with settings
+REM Start Ollama server in background
 start /B ollama serve
 
 REM Wait for Ollama to be ready
@@ -33,9 +34,9 @@ timeout /t 3 /nobreak >nul
 echo ✓ Ollama server started
 echo.
 echo This configuration:
-echo   - Uses GPU for 6 layers (modest speed boost)
-echo   - Falls back to CPU for remaining 26 layers
-echo   - SAFE: Won't crash with OOM errors on 4GB GPU
+echo   - 100%% CPU mode (no GPU)
+echo   - Slower but VERY stable
+echo   - Expected response time: 3-8 seconds
 echo.
 echo Starting OwnClaude...
 echo.
