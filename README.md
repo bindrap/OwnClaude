@@ -1,10 +1,10 @@
-# OwnClaude
+# PBOS AI (formerly OwnClaude)
 
-A terminal-based AI assistant that performs computer tasks on your behalf - from opening applications and managing files to helping with coding and answering questions. Your personal AI companion for productivity and automation.
+A terminal-based PBOS AI companion (Personal Bot Operating System) that performs computer tasks on your behalf - from opening applications and managing files to helping with coding and answering questions. Your personal AI copilot for productivity and automation.
 
 ## Overview
 
-OwnClaude is a command-line AI assistant designed to help you control your computer through natural language commands. Whether you need to open your email, close browsers, edit Excel files, write code, or get quick answers, OwnClaude handles it all from your terminal.
+PBOS AI is a command-line assistant designed to help you control your computer through natural language commands. Whether you need to open your email, close browsers, edit Excel files, write code, or get quick answers, PBOS AI handles it all from your terminal.
 
 ## Features
 
@@ -43,7 +43,7 @@ OwnClaude is a command-line AI assistant designed to help you control your compu
 
 ## Model Options
 
-OwnClaude supports two deployment modes:
+PBOS AI supports two deployment modes:
 
 ### 1. Local Model (Ollama)
 Run AI models directly on your machine for privacy and offline access.
@@ -70,6 +70,20 @@ Use cloud-hosted models for more powerful capabilities.
 **Requirements:**
 - Internet connection
 - API credentials
+
+### ⚡ Runtime model switching
+You can change how OwnClaude answers without restarting the app:
+
+- `use cloud` / `use local` – swap between local inference and Ollama Cloud
+- `set model <name>` – override the active model (e.g., `set model llama3.1:70b`)
+- `model` or `models` – show current mode plus recommended options
+- After each natural-language question, PBOS AI can ask where to send it (local vs cloud). Set `interface.ask_destination` in `config.json` to toggle this prompt.
+
+Recommended presets to mirror Codex/Claude style output:
+
+- **Speed:** `phi3:mini`, `gemma2:2b` (fast but concise)
+- **Balanced:** `llama3.1:8b`, `mistral:7b`, `qwen2.5:7b`
+- **Claude-like depth:** `gpt-oss:120b-cloud`, `llama3.1:70b`, `deepseek-coder:33b`
 
 ## Installation
 
@@ -107,6 +121,9 @@ Edit `config.json` to set your preferences:
     "allow_app_control": true,
     "allow_file_operations": true,
     "allow_browser_control": true
+  },
+  "interface": {
+    "ask_destination": true
   }
 }
 ```

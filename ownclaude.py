@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""OwnClaude - Your personal AI assistant for computer control with memory and planning."""
+"""PBOS AI (Personal Bot Operating System) - fast CLI assistant with memory and planning."""
 
 import sys
 import json
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -30,10 +31,10 @@ from ownclaude.core.executor import CommandExecutor
 
 
 class OwnClaude:
-    """Main OwnClaude application with enhanced memory and planning capabilities."""
+    """Main PBOS AI application with enhanced memory and planning capabilities."""
 
     def __init__(self, config_path: Optional[Path] = None):
-        """Initialize OwnClaude.
+        """Initialize PBOS AI.
 
         Args:
             config_path: Path to configuration file.
@@ -51,6 +52,12 @@ class OwnClaude:
         self.session_context: Dict[str, Any] = {}
         self.show_task_plan: bool = True
         self.exit_requested: bool = False
+        self.max_runtime_seconds: int = 90
+        self.recommended_models = {
+            "fast": ["phi3:mini", "gemma2:2b", "llama3.2:3b"],
+            "balanced": ["llama3.1:8b", "mistral:7b", "qwen2.5:7b"],
+            "claude_like": ["gpt-oss:120b-cloud", "llama3.1:70b", "deepseek-coder:33b"],
+        }
 
     def initialize(self) -> bool:
         """Initialize the application.
@@ -149,7 +156,7 @@ class OwnClaude:
             self.console.print("[cyan]Quick fix:[/cyan]")
             self.console.print("[cyan]  1. Run: ollama pull llama3.1:8b[/cyan]")
             self.console.print("[cyan]  2. Edit config.json: \"model\": \"llama3.1:8b\"[/cyan]")
-            self.console.print("[cyan]  3. Restart OwnClaude[/cyan]")
+            self.console.print("[cyan]  3. Restart PBOS AI[/cyan]")
             self.console.print()
             self.console.print("[dim]See MODEL_GUIDE.md for more details[/dim]")
             self.console.print()
@@ -165,6 +172,102 @@ class OwnClaude:
             self.console.print("[dim]See MODEL_GUIDE.md for recommendations[/dim]")
             self.console.print()
 
+    def _switch_model_source(self, target: str) -> None:
+        """Switch between local and cloud inference on the fly."""
+        target = target.lower()
+        if target not in {"local", "cloud"}:
+            self.console.print("[red]Model source must be 'local' or 'cloud'.[/red]")
+            return
+
+        if target == self.config.model_type:
+            self.console.print(f"[green]Already using {target} models.[/green]")
+            return
+
+        try:
+            self.ollama.switch_mode(target)
+            self.executor.update_ollama_client(self.ollama)
+            self.config.model_type = target
+            connection_ok = self.ollama.check_connection()
+            if connection_ok:
+                self.console.print(f"[green]✓ Switched to {target} mode and connection verified.[/green]")
+            else:
+                self.console.print(f"[yellow]Switched to {target} mode, but connection could not be verified.[/yellow]")
+        except Exception as exc:
+            self.console.print(f"[red]Failed to switch model source: {exc}[/red]")
+            logger.exception("Model switch failed")
+
+    def _set_model_name(self, model_name: str) -> None:
+        """Update the default model for the current mode."""
+        if not model_name:
+            self.console.print("[red]Please provide a model name.[/red]")
+            return
+
+        try:
+            self.ollama.set_default_model(model_name)
+            self.console.print(f"[green]✓ Using model: {model_name}[/green]")
+            self._check_model_quality()
+        except Exception as exc:
+            self.console.print(f"[red]Failed to set model: {exc}[/red]")
+            logger.exception("Model set failed")
+
+    def _show_model_info(self) -> None:
+        """Display active model settings and recommendations."""
+        table = Table(title="Model Configuration")
+        table.add_column("Setting", style="cyan")
+        table.add_column("Value", style="green")
+
+        mode = self.config.model_type
+        active_model = self.config.ollama.local.model if mode == "local" else self.config.ollama.cloud.model
+        table.add_row("Mode", mode.capitalize())
+        table.add_row("Active Model", active_model)
+        if mode == "local":
+            table.add_row("Endpoint", self.config.ollama.local.host)
+        else:
+            table.add_row("Endpoint", self.config.ollama.cloud.endpoint)
+        table.add_row("Routing", "✓ Enabled" if getattr(self.config, "enable_model_routing", False) else "✗ Disabled")
+
+        rec_lines = []
+        for label, models in self.recommended_models.items():
+            rec_lines.append(f"{label.title()}: {', '.join(models)}")
+
+        self.console.print(table)
+        self.console.print(Panel(
+            "\n".join(rec_lines),
+            title="[bold cyan]Suggested Models[/bold cyan]",
+            border_style="cyan"
+        ))
+
+    def _run_with_timeout(self, user_input: str) -> str:
+        """Execute the command with a hard timeout to avoid hangs."""
+        timeout = getattr(self.config.ollama.local, "timeout", self.max_runtime_seconds)
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                self.executor.execute_command,
+                user_input,
+                self.conversation_history,
+                self.current_plan,
+            )
+
+            try:
+                return future.result(timeout=timeout)
+            except FuturesTimeout:
+                future.cancel()
+                self.console.print(
+                    "[red]Response took too long and was cancelled. Try 'use cloud' for faster answers or switch to a smaller local model.[/red]"
+                )
+                raise
+            except TypeError:
+                # Fallback for executors that don't accept extra parameters
+                future = executor.submit(self.executor.execute_command, user_input)
+                try:
+                    return future.result(timeout=timeout)
+                except FuturesTimeout:
+                    future.cancel()
+                    self.console.print(
+                        "[red]Response took too long and was cancelled. Try 'use cloud' for faster answers or switch to a smaller local model.[/red]"
+                    )
+                    raise
     def _plan_task(self, user_input: str) -> Dict[str, Any]:
         """Generate a task plan before execution."""
         self.console.print("[cyan]Creating task plan...[/cyan]")
@@ -314,14 +417,42 @@ Provide:
         Returns:
             True if this appears to be a question.
         """
-        question_indicators = ["what", "why", "how", "when", "where", "who", "tell me", "explain"]
+        question_indicators = ["what", "why", "how", "when", "where", "who", "tell me", "explain", "?", "can you"]
         action_indicators = ["create", "make", "write", "build", "delete", "modify", "open", "run"]
 
         input_lower = user_input.lower()
         has_question = any(word in input_lower for word in question_indicators)
         has_action = any(word in input_lower for word in action_indicators)
 
-        return has_question and not has_action
+        has_question_mark = user_input.strip().endswith("?")
+
+        return (has_question or has_question_mark) and not has_action
+
+    def _prompt_destination(self, session: "PromptSession") -> Optional[str]:
+        """Ask the user where to route the current chat question."""
+        if not getattr(self.config.interface, "ask_destination", True):
+            return None
+
+        default = self.config.model_type
+        prompt = (
+            f"Route this question to [local/cloud]? Press Enter to keep {default}: "
+        )
+
+        try:
+            choice = session.prompt(prompt)
+        except (KeyboardInterrupt, EOFError):
+            self.console.print("[yellow]Keeping current model source.[/yellow]")
+            return None
+
+        choice = choice.strip().lower()
+        if not choice:
+            return None
+
+        if choice in {"local", "cloud"}:
+            return choice
+
+        self.console.print("[yellow]Unrecognized option. Keeping current model source.[/yellow]")
+        return None
 
     def _execute_with_streaming(self, user_input: str, start_time: float) -> str:
         """Execute command and stream the response in real-time.
@@ -347,11 +478,17 @@ Provide:
         full_response = ""
         display_text = Text()
 
-        with Live(display_text, console=self.console, refresh_per_second=10) as live:
-            for chunk in self.ollama.chat(prompt, stream=True):
-                full_response += chunk
-                display_text.append(chunk)
-                live.update(display_text)
+        try:
+            with Live(display_text, console=self.console, refresh_per_second=10) as live:
+                for chunk in self.ollama.chat(prompt, stream=True):
+                    full_response += chunk
+                    display_text.append(chunk)
+                    live.update(display_text)
+        except TimeoutError:
+            self.console.print(
+                "\n[red]The model stopped responding. Try 'use cloud' for instant answers or switch to a smaller local model.[/red]"
+            )
+            return ""
 
         # Parse to extract explanation if it's JSON
         action_data = self.executor._parse_ai_response(full_response)
@@ -374,7 +511,7 @@ Provide:
         self.console.print()
         self.console.print(Panel(
             final_response,
-            title=f"[bold cyan]OwnClaude[/bold cyan] [dim]({time_str})[/dim]",
+            title=f"[bold cyan]PBOS AI[/bold cyan] [dim]({time_str})[/dim]",
             border_style="cyan"
         ))
         self.console.print()
@@ -410,7 +547,7 @@ Provide:
         """Run the interactive CLI with enhanced capabilities."""
         self._print_banner()
 
-        history_file = Path.home() / ".ownclaude_history"
+        history_file = Path.home() / ".pbos_history"
         kb = KeyBindings()
 
         @kb.add('f2')
@@ -449,56 +586,71 @@ Provide:
                 if not user_input:
                     continue
 
+                lower_input = user_input.lower()
+
                 self._update_conversation_history("user", user_input)
 
                 # Special commands
-                if user_input.lower() in ['exit', 'quit', 'q']:
+                if lower_input in ['exit', 'quit', 'q']:
                     self.console.print("\n[yellow]Goodbye! 👋[/yellow]")
                     break
-                if user_input.lower() == 'help':
+                if lower_input == 'help':
                     self._show_help()
                     continue
-                if user_input.lower() == 'clear':
+                if lower_input == 'clear':
                     self.console.clear()
                     self._print_banner()
                     continue
-                if user_input.lower() == 'history':
+                if lower_input == 'history':
                     self._show_history()
                     continue
-                if user_input.lower() == 'status':
+                if lower_input == 'status':
                     self._show_status()
                     continue
-                if user_input.lower() == 'memory':
+                if lower_input in ['model', 'models']:
+                    self._show_model_info()
+                    continue
+                if lower_input in ['use cloud', 'cloud mode']:
+                    self._switch_model_source('cloud')
+                    continue
+                if lower_input in ['use local', 'local mode']:
+                    self._switch_model_source('local')
+                    continue
+                if lower_input.startswith('set model'):
+                    _, _, model_name = user_input.partition('set model')
+                    self._set_model_name(model_name.strip())
+                    continue
+                if lower_input == 'memory':
                     self._show_memory()
                     continue
-                if user_input.lower() == 'plan':
+                if lower_input == 'plan':
                     self._show_current_plan()
                     continue
-                if user_input.lower() == 'plan off':
+                if lower_input == 'plan off':
                     self.show_task_plan = False
                     self.console.print("[dim]Task plan preview hidden.[/dim]")
                     continue
-                if user_input.lower() == 'plan on':
+                if lower_input == 'plan on':
                     self.show_task_plan = True
                     self.console.print("[dim]Task plan preview shown.[/dim]")
                     continue
-                if user_input.lower() == 'plan toggle':
+                if lower_input == 'plan toggle':
                     self.show_task_plan = not self.show_task_plan
                     status = "shown" if self.show_task_plan else "hidden"
                     self.console.print(f"[dim]Task plan preview {status}.[/dim]")
                     continue
-                if user_input.lower().startswith('rollback'):
+                if lower_input.startswith('rollback'):
                     parts = user_input.split()
                     if len(parts) > 1:
                         self._rollback_operation(parts[1])
                     else:
                         self.console.print("[red]Usage: rollback <operation_id>[/red]")
                     continue
-                if user_input.lower().startswith('diagnose'):
+                if lower_input.startswith('diagnose'):
                     problem = user_input[9:].strip()
                     self._handle_diagnosis(problem)
                     continue
-                if user_input.lower().startswith('review'):
+                if lower_input.startswith('review'):
                     self._handle_code_review(user_input)
                     continue
 
@@ -522,20 +674,16 @@ Provide:
                 is_chat_question = self._is_chat_question(user_input)
 
                 if is_chat_question:
+                    route_choice = self._prompt_destination(session)
+                    if route_choice and route_choice != self.config.model_type:
+                        self._switch_model_source(route_choice)
+
                     # Stream the response for chat questions
                     response = self._execute_with_streaming(user_input, start_time)
                 else:
                     # Use normal execution for actions
                     with self.console.status("[cyan]Thinking...[/cyan]"):
-                        try:
-                            response = self.executor.execute_command(
-                                user_input,
-                                context=self.conversation_history,
-                                plan=self.current_plan
-                            )
-                        except TypeError:
-                            # Fallback for executors that don't accept extra parameters
-                            response = self.executor.execute_command(user_input)
+                        response = self._run_with_timeout(user_input)
 
                     # Calculate elapsed time
                     elapsed_time = time.time() - start_time
@@ -550,7 +698,7 @@ Provide:
 
                     self.console.print(Panel(
                         response,
-                        title=f"[bold cyan]OwnClaude[/bold cyan] [dim]({time_str})[/dim]",
+                        title=f"[bold cyan]PBOS AI[/bold cyan] [dim]({time_str})[/dim]",
                         border_style="cyan"
                     ))
                     self.console.print()
@@ -559,6 +707,9 @@ Provide:
                 self.console.print("\n[yellow]Use 'exit' or 'quit' to leave.[/yellow]")
             except EOFError:
                 break
+            except FuturesTimeout:
+                # Already messaged the user in _run_with_timeout
+                continue
             except Exception as e:
                 self.console.print(f"[red]Error: {e}[/red]")
                 logger.exception("Runtime error")
@@ -566,13 +717,20 @@ Provide:
     def _print_banner(self) -> None:
         """Print application banner."""
         banner = """
-╔═══════════════════════════════════════════════════════════╗
-║                        OwnClaude                          ║
-║                                                           ║
-║     Your Personal AI Assistant for Computer Control       ║
-╚═══════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════╗
+║                     PBOS AI — Personal Bot OS                ║
+║    Precision • Bandwidth • Orchestration • Speed • Stream    ║
+║        Terminal-native copilot with instant routing          ║
+╚══════════════════════════════════════════════════════════════╝
+        """
+        art = r"""
+              ___  ____   ___   ____      ___    ___    _      ___ 
+             | _ \| __ ) / _ \ | __ ) _ _| _ )  / _ \  | |    / _ \
+             |  _/|  _ \| | | ||  _ \| '_| _ \ | (_) | | |__ | (_) |
+             |_|  |_| \_\\___/ |____/|_| |___/  \___/  |____| \___/
         """
         self.console.print(f"[bold cyan]{banner}[/bold cyan]")
+        self.console.print(f"[cyan]{art}[/cyan]")
 
         model_type = self.config.model_type
         model_name = (self.config.ollama.local.model if model_type == "local"
@@ -649,7 +807,7 @@ Provide:
     def _show_help(self) -> None:
         """Display enhanced help information."""
         help_text = """
-OwnClaude Enhanced Help
+PBOS AI Quick Guide
 
 Natural Language Commands
 You can control your computer using natural language:
@@ -663,6 +821,9 @@ Special Commands
 - help: Show this help message
 - clear: Clear the screen
 - status: Show system status and permissions
+- model/models: Show current model settings and recommendations
+- use cloud / use local: Toggle between cloud and local inference
+- set model <name>: Override the default model for the active mode
 - history: Show operation history
 - memory: Show conversation memory/context
 - plan: Show current task plan
@@ -672,7 +833,7 @@ Special Commands
 - diagnose <issue>: Diagnose system issues
 - review <code/file>: Review code for issues
 - rollback <id>: Rollback an operation
-- exit/quit: Exit OwnClaude
+- exit/quit: Exit PBOS AI
 
 Examples
 - Open applications: "open calculator", "launch Excel"
@@ -696,6 +857,10 @@ Examples
         table.add_column("Value", style="green")
 
         perms = self.config.system_permissions
+        mode = self.config.model_type
+        active_model = self.config.ollama.local.model if mode == "local" else self.config.ollama.cloud.model
+        table.add_row("Model Mode", mode.capitalize())
+        table.add_row("Active Model", active_model)
         table.add_row("App Control", "✓ Enabled" if perms.allow_app_control else "✗ Disabled")
         table.add_row("File Operations", "✓ Enabled" if perms.allow_file_operations else "✗ Disabled")
         table.add_row("Browser Control", "✓ Enabled" if perms.allow_browser_control else "✗ Disabled")
@@ -822,7 +987,7 @@ Examples
 def main() -> None:
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="OwnClaude - Your personal AI assistant"
+        description="PBOS AI - Your personal terminal copilot"
     )
     parser.add_argument(
         "--config",

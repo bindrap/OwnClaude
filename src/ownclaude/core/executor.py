@@ -22,7 +22,7 @@ class CommandExecutor:
     """Executes commands based on AI interpretation."""
 
     # System prompt for the AI
-    SYSTEM_PROMPT = """You are OwnClaude, a powerful AI assistant that helps users control their computer and work with code through natural language commands.
+    SYSTEM_PROMPT = """You are PBOS AI (Personal Bot Operating System), a powerful terminal-native assistant that helps users control their computer and work with code through natural language commands.
 
 Your role is to understand user requests and respond with exactly one structured action. You can:
 1. Answer questions and provide information directly (MOST IMPORTANT - always prefer this for factual questions)
@@ -184,6 +184,11 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
         self.last_user_input = ""
 
         # Set system prompt
+        self.ollama.set_system_prompt(self.SYSTEM_PROMPT)
+
+    def update_ollama_client(self, ollama_client: OllamaClient) -> None:
+        """Update the Ollama client reference while keeping executor state."""
+        self.ollama = ollama_client
         self.ollama.set_system_prompt(self.SYSTEM_PROMPT)
 
     def execute_command(

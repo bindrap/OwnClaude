@@ -1,6 +1,8 @@
-"""Ollama client wrapper for OwnClaude."""
+"""Ollama client wrapper for PBOS AI."""
 
 import json
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from typing import Dict, List, Optional, Generator
 
 import ollama
@@ -31,6 +33,27 @@ class OllamaClient:
         # Model routing enabled?
         self.routing_enabled = getattr(config, "enable_model_routing", False)
         self.routing_config = getattr(config, "model_routing", None)
+
+    def switch_mode(self, model_type: str) -> None:
+        """Switch between local and cloud modes without re-instantiating.
+
+        Args:
+            model_type: Either "local" or "cloud".
+        """
+        if model_type not in {"local", "cloud"}:
+            raise ValueError("model_type must be 'local' or 'cloud'")
+
+        self.model_type = model_type
+        self.model_config = self.config.ollama.local if model_type == "local" else self.config.ollama.cloud
+        self.clear_history()
+
+    def set_default_model(self, model_name: str) -> None:
+        """Update the default model for the active mode."""
+        self.model_config.model = model_name
+        if self.model_type == "local":
+            self.config.ollama.local.model = model_name
+        else:
+            self.config.ollama.cloud.model = model_name
 
     def _select_model(self, user_message: str) -> str:
         """Select the best model for the given message.
@@ -211,6 +234,8 @@ class OllamaClient:
         Yields:
             Chunks of the response.
         """
+        stall_timeout = getattr(self.model_config, "timeout", 60) or 60
+
         if self.model_type == "local":
             stream = ollama.chat(
                 model=model,
@@ -223,10 +248,24 @@ class OllamaClient:
             )
 
             full_response = ""
-            for chunk in stream:
-                content = chunk['message']['content']
-                full_response += content
-                yield content
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                iterator = iter(stream)
+                while True:
+                    future = pool.submit(next, iterator, None)
+                    try:
+                        chunk = future.result(timeout=stall_timeout)
+                    except FuturesTimeout:
+                        future.cancel()
+                        raise TimeoutError(
+                            "No tokens received from local model within timeout window"
+                        )
+
+                    if chunk is None:
+                        break
+
+                    content = chunk['message']['content']
+                    full_response += content
+                    yield content
 
             # Add complete response to history
             self.conversation_history.append({
@@ -234,9 +273,66 @@ class OllamaClient:
                 "content": full_response
             })
         else:
-            # Cloud streaming would go here
-            # For now, fall back to standard chat
-            yield self._cloud_chat()
+            yield from self._stream_cloud_chat(stall_timeout)
+
+    def _stream_cloud_chat(self, stall_timeout: Optional[int] = None) -> Generator[str, None, None]:
+        """Stream chat responses from Ollama Cloud when available."""
+        cloud_config: OllamaCloudConfig = self.model_config
+        headers = {
+            "Authorization": f"Bearer {cloud_config.api_key}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "model": cloud_config.model,
+            "messages": self.conversation_history,
+            "temperature": cloud_config.temperature,
+            "top_p": cloud_config.top_p,
+            "stream": True,
+        }
+
+        full_response = ""
+        last_chunk_time = time.time()
+        try:
+            with requests.post(
+                f"{cloud_config.endpoint}/api/chat",
+                headers=headers,
+                json=payload,
+                timeout=cloud_config.timeout,
+                stream=True,
+            ) as response:
+                response.raise_for_status()
+
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    try:
+                        data = json.loads(line.decode("utf-8"))
+                    except json.JSONDecodeError:
+                        continue
+
+                    content = data.get("message", {}).get("content") or data.get("content")
+                    if content:
+                        full_response += content
+                        last_chunk_time = time.time()
+                        yield content
+
+                    if stall_timeout and (time.time() - last_chunk_time) > stall_timeout:
+                        raise TimeoutError(
+                            "No tokens received from cloud model within timeout window"
+                        )
+
+        except requests.RequestException as exc:
+            logger.error(f"Cloud streaming failed: {exc}")
+            fallback = self._cloud_chat()
+            full_response += fallback
+            yield fallback
+
+        if full_response:
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": full_response
+            })
 
     def clear_history(self) -> None:
         """Clear conversation history."""

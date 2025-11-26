@@ -1,9 +1,9 @@
 @echo off
-REM OwnClaude CPU-Only Launcher
+REM PBOS AI CPU-Only Launcher
 REM For when GPU causes issues or you need maximum stability
 
 echo ========================================
-echo   OwnClaude CPU-Only Launcher
+echo   PBOS AI (Personal Bot OS) CPU Mode
 echo ========================================
 echo.
 echo Configuring Ollama for CPU-only mode...
@@ -38,7 +38,7 @@ echo   - 100%% CPU mode (no GPU)
 echo   - Slower but VERY stable
 echo   - Expected response time: 3-8 seconds
 echo.
-echo Starting OwnClaude...
+echo Starting PBOS AI...
 echo.
 
 REM Activate venv if it exists

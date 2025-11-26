@@ -40,7 +40,8 @@
     "show_timestamps": true,
     "show_token_usage": false,
     "auto_save_history": true,
-    "history_limit": 1000
+    "history_limit": 1000,
+    "ask_destination": true
   },
   "logging": {
     "level": "INFO",
