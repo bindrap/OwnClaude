@@ -1,15 +1,21 @@
 {
+  "_comment_model": "IMPORTANT: Use llama3.1:8b or larger! Small models (3b) don't work well. See MODEL_GUIDE.md",
+  "_comment_speed": "SPEED OPTIMIZED: Task planning disabled, lower temp, reduced context for faster responses",
+  "_comment_gpu": "With GPU: Expect 0.5-2s responses. Without GPU: 2-5s responses",
   "model_type": "local",
   "ollama": {
     "local": {
       "host": "http://localhost:11434",
-      "model": "llama3.2",
-      "temperature": 0.7,
-      "top_p": 0.9,
-      "timeout": 30
+      "model": "llama3.1:8b",
+      "_comment_model_options": "Recommended: llama3.1:8b, mistral:7b, qwen2.5:7b, deepseek-coder:6.7b",
+      "_comment_faster_models": "For speed: phi3:mini (2x faster), gemma:2b (3x faster)",
+      "_comment_avoid": "AVOID: llama3.2:3b (too small, doesn't follow instructions)",
+      "temperature": 0.3,
+      "top_p": 0.8,
+      "timeout": 60
     },
     "cloud": {
-      "api_key": "1728cbe73f944db7afa1a3c8f52d2f41.GzEVZ8ADdcDHwIxdbvKnqbXy",
+      "api_key": "your-api-key-here",
       "endpoint": "https://ollama.com",
       "model": "gpt-oss:120b-cloud",
       "temperature": 0.7,
@@ -58,6 +64,13 @@
     "enable_voice_input": false,
     "enable_auto_completion": true,
     "enable_context_awareness": true,
-    "max_context_messages": 20
+    "enable_task_planning": false,
+    "_comment_planning": "Task planning disabled for 30-40% speed boost. Enable for complex multi-step tasks.",
+    "enable_code_analysis": true,
+    "enable_git_integration": true,
+    "max_context_messages": 10,
+    "_comment_context": "Reduced from 20 to 10 for faster responses. Increase if you need longer conversation memory.",
+    "project_scan_depth": 5,
+    "code_search_max_results": 50
   }
 }

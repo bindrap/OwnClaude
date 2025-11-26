@@ -80,13 +80,30 @@ class FeaturesConfig(BaseModel):
     enable_voice_input: bool = False
     enable_auto_completion: bool = True
     enable_context_awareness: bool = True
-    max_context_messages: int = 20
+    enable_task_planning: bool = False  # Disabled by default for speed
+    enable_code_analysis: bool = True
+    enable_git_integration: bool = True
+    max_context_messages: int = 10  # Reduced for faster responses
+    project_scan_depth: int = 5
+    code_search_max_results: int = 50
+
+
+class ModelRoutingConfig(BaseModel):
+    """Model routing configuration."""
+    default_model: str = "qwen2.5:7b"
+    models: Dict[str, Any] = Field(default_factory=dict)
+
+    class Config:
+        """Pydantic config."""
+        extra = "allow"
 
 
 class Config(BaseModel):
     """Main configuration model."""
     model_type: str = "local"
+    enable_model_routing: bool = False
     ollama: OllamaConfig
+    model_routing: Optional[ModelRoutingConfig] = None
     system_permissions: SystemPermissions
     interface: InterfaceConfig
     logging: LoggingConfig

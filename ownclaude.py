@@ -4,6 +4,7 @@
 import sys
 import json
 import subprocess
+import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -80,6 +81,10 @@ class OwnClaude:
                 return False
 
             self.console.print("[green]✓ Connected to Ollama[/green]")
+
+            # Warn about small models
+            self._check_model_quality()
+
             return True
 
         except FileNotFoundError as e:
@@ -118,6 +123,47 @@ class OwnClaude:
             level="ERROR",
             format="<red>{level}</red>: {message}"
         )
+
+    def _check_model_quality(self) -> None:
+        """Check if the model is suitable and warn if not."""
+        model_name = self.config.ollama.local.model if self.config.model_type == "local" else self.config.ollama.cloud.model
+
+        # Models known to be too small
+        small_models = ["3b", ":3b", "tiny", "mini"]
+        is_small = any(marker in model_name.lower() for marker in small_models)
+
+        # Recommended models
+        good_models = ["llama3.1:8b", "mistral:7b", "qwen2.5:7b", "deepseek-coder", ":8b", ":7b", "13b", "70b"]
+        is_good = any(marker in model_name.lower() for marker in good_models)
+
+        if is_small:
+            self.console.print()
+            self.console.print("[bold red]⚠️  WARNING: Small Model Detected![/bold red]")
+            self.console.print(f"[yellow]You're using: {model_name}[/yellow]")
+            self.console.print("[yellow]Small models (<5B parameters) often:[/yellow]")
+            self.console.print("[yellow]  • Open URLs instead of answering questions[/yellow]")
+            self.console.print("[yellow]  • Provide empty or incomplete responses[/yellow]")
+            self.console.print("[yellow]  • Don't follow instructions properly[/yellow]")
+            self.console.print()
+            self.console.print("[bold green]RECOMMENDED: Switch to llama3.1:8b or larger[/bold green]")
+            self.console.print("[cyan]Quick fix:[/cyan]")
+            self.console.print("[cyan]  1. Run: ollama pull llama3.1:8b[/cyan]")
+            self.console.print("[cyan]  2. Edit config.json: \"model\": \"llama3.1:8b\"[/cyan]")
+            self.console.print("[cyan]  3. Restart OwnClaude[/cyan]")
+            self.console.print()
+            self.console.print("[dim]See MODEL_GUIDE.md for more details[/dim]")
+            self.console.print()
+
+            # Pause to let user see the warning
+            import time
+            time.sleep(3)
+
+        elif not is_good and self.config.model_type == "local":
+            self.console.print()
+            self.console.print(f"[yellow]ℹ️  Using model: {model_name}[/yellow]")
+            self.console.print("[yellow]For best results, we recommend llama3.1:8b or mistral:7b[/yellow]")
+            self.console.print("[dim]See MODEL_GUIDE.md for recommendations[/dim]")
+            self.console.print()
 
     def _plan_task(self, user_input: str) -> Dict[str, Any]:
         """Generate a task plan before execution."""
@@ -259,17 +305,106 @@ Provide:
         command_lower = command.lower().strip()
         return any(cmd in command_lower for cmd in safe_commands)
 
+    def _is_chat_question(self, user_input: str) -> bool:
+        """Determine if input is a chat question vs an action request.
+
+        Args:
+            user_input: The user's input.
+
+        Returns:
+            True if this appears to be a question.
+        """
+        question_indicators = ["what", "why", "how", "when", "where", "who", "tell me", "explain"]
+        action_indicators = ["create", "make", "write", "build", "delete", "modify", "open", "run"]
+
+        input_lower = user_input.lower()
+        has_question = any(word in input_lower for word in question_indicators)
+        has_action = any(word in input_lower for word in action_indicators)
+
+        return has_question and not has_action
+
+    def _execute_with_streaming(self, user_input: str, start_time: float) -> str:
+        """Execute command and stream the response in real-time.
+
+        Args:
+            user_input: The user's input.
+            start_time: When execution started.
+
+        Returns:
+            The complete response.
+        """
+        from rich.live import Live
+        from rich.text import Text
+
+        # Build the prompt
+        prompt = self.executor._build_augmented_prompt(
+            user_input,
+            self.conversation_history,
+            self.current_plan
+        )
+
+        # Stream the response
+        full_response = ""
+        display_text = Text()
+
+        with Live(display_text, console=self.console, refresh_per_second=10) as live:
+            for chunk in self.ollama.chat(prompt, stream=True):
+                full_response += chunk
+                display_text.append(chunk)
+                live.update(display_text)
+
+        # Parse to extract explanation if it's JSON
+        action_data = self.executor._parse_ai_response(full_response)
+        if action_data and action_data.get("action") == "chat":
+            final_response = action_data.get("explanation", full_response)
+        else:
+            final_response = full_response
+
+        # Calculate elapsed time
+        elapsed_time = time.time() - start_time
+        if elapsed_time < 1:
+            time_str = f"{elapsed_time*1000:.0f}ms"
+        else:
+            time_str = f"{elapsed_time:.2f}s"
+
+        # Update history
+        self._update_conversation_history("assistant", final_response)
+
+        # Show final formatted response
+        self.console.print()
+        self.console.print(Panel(
+            final_response,
+            title=f"[bold cyan]OwnClaude[/bold cyan] [dim]({time_str})[/dim]",
+            border_style="cyan"
+        ))
+        self.console.print()
+
+        return final_response
+
     def _update_conversation_history(self, role: str, content: str) -> None:
-        """Add message to conversation history with context management."""
+        """Add message to conversation history with smart context management."""
         self.conversation_history.append({
             "role": role,
             "content": content,
             "timestamp": datetime.now().isoformat()
         })
 
-        max_messages = getattr(self.config.features, "max_context_messages", 20)
+        max_messages = getattr(self.config.features, "max_context_messages", 10)
+
+        # Smart trimming: Keep recent messages + important context
         if len(self.conversation_history) > max_messages:
-            self.conversation_history = self.conversation_history[-max_messages:]
+            # Always keep the most recent messages
+            recent = self.conversation_history[-max_messages:]
+
+            # Keep important messages from earlier (file creations, errors, etc.)
+            important_keywords = ["created", "error", "warning", "file", "installed", "configured"]
+            important_old = [
+                msg for msg in self.conversation_history[:-max_messages]
+                if any(keyword in msg["content"].lower() for keyword in important_keywords)
+            ]
+
+            # Combine: up to 3 important old messages + all recent messages
+            self.conversation_history = important_old[-3:] + recent
 
     def run(self) -> None:
         """Run the interactive CLI with enhanced capabilities."""
@@ -303,9 +438,14 @@ Provide:
 
         while True:
             try:
-                user_input = session.prompt("You: ").strip()
-                if self.exit_requested:
+                user_input = session.prompt("You: ")
+
+                # Handle Ctrl+C or None input
+                if user_input is None or self.exit_requested:
+                    self.console.print("\n[yellow]Goodbye! 👋[/yellow]")
                     break
+
+                user_input = user_input.strip()
                 if not user_input:
                     continue
 
@@ -362,8 +502,11 @@ Provide:
                     self._handle_code_review(user_input)
                     continue
 
-                # Plan task if enabled
-                if getattr(self.config.features, "enable_task_planning", True):
+                # Start timing
+                start_time = time.time()
+
+                # Plan task if enabled (default False for speed)
+                if getattr(self.config.features, "enable_task_planning", False):
                     with self.console.status("[cyan]Planning task...[/cyan]"):
                         self.current_plan = self._plan_task(user_input)
 
@@ -374,26 +517,43 @@ Provide:
                     if self.show_task_plan:
                         self._print_plan_preview(self.current_plan)
 
-                # Execute command
-                with self.console.status("[cyan]Thinking...[/cyan]"):
-                    try:
-                        response = self.executor.execute_command(
-                            user_input,
-                            context=self.conversation_history,
-                            plan=self.current_plan
-                        )
-                    except TypeError:
-                        # Fallback for executors that don't accept extra parameters
-                        response = self.executor.execute_command(user_input)
+                # Execute command with streaming for better UX
+                # Detect if this is likely a chat question vs an action
+                is_chat_question = self._is_chat_question(user_input)
 
-                self._update_conversation_history("assistant", response)
+                if is_chat_question:
+                    # Stream the response for chat questions
+                    response = self._execute_with_streaming(user_input, start_time)
+                else:
+                    # Use normal execution for actions
+                    with self.console.status("[cyan]Thinking...[/cyan]"):
+                        try:
+                            response = self.executor.execute_command(
+                                user_input,
+                                context=self.conversation_history,
+                                plan=self.current_plan
+                            )
+                        except TypeError:
+                            # Fallback for executors that don't accept extra parameters
+                            response = self.executor.execute_command(user_input)
 
-                self.console.print(Panel(
-                    response,
-                    title="[bold cyan]OwnClaude[/bold cyan]",
-                    border_style="cyan"
-                ))
-                self.console.print()
+                    # Calculate elapsed time
+                    elapsed_time = time.time() - start_time
+
+                    self._update_conversation_history("assistant", response)
+
+                    # Format elapsed time nicely
+                    if elapsed_time < 1:
+                        time_str = f"{elapsed_time*1000:.0f}ms"
+                    else:
+                        time_str = f"{elapsed_time:.2f}s"
+
+                    self.console.print(Panel(
+                        response,
+                        title=f"[bold cyan]OwnClaude[/bold cyan] [dim]({time_str})[/dim]",
+                        border_style="cyan"
+                    ))
+                    self.console.print()
 
             except KeyboardInterrupt:
                 self.console.print("\n[yellow]Use 'exit' or 'quit' to leave.[/yellow]")
@@ -620,12 +780,16 @@ Examples
             self.console.print("[red]Please specify the problem to diagnose.[/red]")
             return
 
+        start_time = time.time()
         with self.console.status("[cyan]Diagnosing issue...[/cyan]"):
             diagnosis = self._diagnose_issue(problem)
+        elapsed_time = time.time() - start_time
+
+        time_str = f"{elapsed_time*1000:.0f}ms" if elapsed_time < 1 else f"{elapsed_time:.2f}s"
 
         self.console.print(Panel(
             diagnosis,
-            title="[bold red]System Diagnosis[/bold red]",
+            title=f"[bold red]System Diagnosis[/bold red] [dim]({time_str})[/dim]",
             border_style="red"
         ))
 
@@ -633,6 +797,7 @@ Examples
         """Handle code review requests."""
         task_context = user_input[len("review"):].strip()
 
+        start_time = time.time()
         with self.console.status("[cyan]Reviewing code...[/cyan]"):
             last_code = ""
             for msg in reversed(self.conversation_history):
@@ -642,9 +807,12 @@ Examples
 
             if last_code:
                 review = self._review_code(last_code, task=task_context)
+                elapsed_time = time.time() - start_time
+                time_str = f"{elapsed_time*1000:.0f}ms" if elapsed_time < 1 else f"{elapsed_time:.2f}s"
+
                 self.console.print(Panel(
                     review,
-                    title="[bold green]Code Review[/bold green]",
+                    title=f"[bold green]Code Review[/bold green] [dim]({time_str})[/dim]",
                     border_style="green"
                 ))
             else:

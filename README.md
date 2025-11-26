@@ -8,12 +8,38 @@ OwnClaude is a command-line AI assistant designed to help you control your compu
 
 ## Features
 
+### 🚀 Core Capabilities
 - **Application Control**: Open and close applications (mail clients, browsers, Excel, etc.)
-- **File Management**: Create, edit, and organize files
-- **Coding Assistant**: Write, edit, and debug code
-- **Task Automation**: Automate repetitive computer tasks
-- **Question Answering**: Get quick answers to your questions
+- **File Management**: Create, read, modify, append, and delete files and directories
 - **Natural Language Interface**: Communicate with your computer naturally
+- **Conversation Memory**: Maintains context throughout your session
+
+### 💻 Code Development
+- **Code Navigation**: Search code with grep, find definitions of functions/classes
+- **Syntax Analysis**: Analyze Python files for structure, imports, and dependencies
+- **Code Search**: Find functions, classes, variables across your codebase
+- **Project Understanding**: Auto-detect project type and structure
+
+### 🔧 Development Tools
+- **Terminal Commands**: Execute shell commands with safety checks
+- **Test Execution**: Auto-detect and run tests (pytest, npm test, cargo test, etc.)
+- **Build Automation**: Auto-detect and run builds for your project type
+- **Linter Integration**: Run code quality checks automatically
+
+### 🌳 Git Integration
+- **Repository Status**: Check current branch, staged/unstaged files
+- **Diff Viewing**: See what changes you've made
+- **Commit Creation**: Stage and commit changes
+- **Branch Management**: Create, switch, and list branches
+- **Commit History**: View file and project history
+
+### 🎯 Advanced Features
+- **Task Planning**: Creates execution plans before running complex tasks
+- **Multi-step Execution**: Handles complex workflows automatically
+- **Context Awareness**: Understands your project structure and files
+- **Safety Checks**: Prevents dangerous commands, requires confirmation for destructive operations
+- **Rollback Support**: Undo file operations when needed
+- **Operation Logging**: Track all actions for review
 
 ## Model Options
 
@@ -85,35 +111,114 @@ Edit `config.json` to set your preferences:
 }
 ```
 
-## Usage
+## Quick Start
 
-### Starting OwnClaude
+### 1. Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/OwnClaude.git
+cd OwnClaude
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Create configuration
+python ownclaude.py --init-config
+# Edit config.json with your settings
+```
+
+### 2. Start Ollama
+
+```bash
+# For local models
+ollama serve
+
+# Pull a model if you haven't already
+ollama pull llama3.2
+```
+
+### 3. Run OwnClaude
 
 ```bash
 python ownclaude.py
 ```
 
-### Example Commands
+## Usage Examples
 
+### Basic Commands
+
+```bash
+# File operations
+You: create a Python script called hello.py that prints hello world
+You: show me what's in hello.py
+You: add a goodbye function to hello.py
+
+# Application control
+You: open my browser
+You: launch calculator
+You: close all chrome windows
+
+# Questions
+You: what is the difference between list and tuple in Python?
 ```
-> open my email
-Opening default email client...
 
-> close all browser windows
-Closing all browser instances...
+### Code Development
 
-> create a Python script that prints hello world
-Creating hello.py...
+```bash
+# Search code
+You: search for "def process" in Python files
+You: find the definition of UserAuth class
+You: show me all TODO comments
 
-> open the sales report Excel file
-Opening sales_report.xlsx...
-
-> help me debug this code: [paste code]
-Analyzing your code...
-
-> what's the weather today?
-Let me check that for you...
+# Project analysis
+You: give me a summary of this project
+You: what's the project structure?
+You: analyze the main.py file
 ```
+
+### Terminal & Testing
+
+```bash
+# Run commands
+You: run 'ls -la' to show files
+You: install the requests package
+
+# Testing and building
+You: run the tests
+You: build the project
+You: check code style with linter
+```
+
+### Git Operations
+
+```bash
+# Check status and changes
+You: what's the git status?
+You: show me the diff
+You: show the last 5 commits
+
+# Make changes
+You: stage all Python files
+You: commit with message "Add new feature"
+You: create a branch called feature-auth
+```
+
+### Advanced Workflows
+
+```bash
+# Complex multi-step tasks
+You: I want to create a new feature branch, add a login function, run tests, and commit the changes
+
+# Code review
+You: review the code I just created
+You: diagnose why my tests are failing
+
+# Project setup
+You: help me set up a new Python project with proper structure
+```
+
+See [USAGE_EXAMPLES.md](USAGE_EXAMPLES.md) for comprehensive examples and workflows.
 
 ## Supported Tasks
 

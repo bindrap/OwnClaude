@@ -28,12 +28,50 @@ class OllamaClient:
         else:
             self.model_config = config.ollama.cloud
 
-    def chat(self, message: str, stream: bool = False) -> str:
+        # Model routing enabled?
+        self.routing_enabled = getattr(config, "enable_model_routing", False)
+        self.routing_config = getattr(config, "model_routing", None)
+
+    def _select_model(self, user_message: str) -> str:
+        """Select the best model for the given message.
+
+        Args:
+            user_message: The user's input message.
+
+        Returns:
+            The model name to use.
+        """
+        # If routing is disabled, use default model
+        if not self.routing_enabled or not self.routing_config:
+            return self.model_config.model
+
+        # Get default model from routing config
+        default_model = self.routing_config.get("default_model", self.model_config.model)
+
+        # Check message against triggers
+        message_lower = user_message.lower()
+        models_dict = self.routing_config.get("models", {})
+
+        # Check each model type's triggers
+        for model_type, model_info in models_dict.items():
+            triggers = model_info.get("triggers", [])
+            for trigger in triggers:
+                if trigger.lower() in message_lower:
+                    selected = model_info.get("model", default_model)
+                    logger.debug(f"Model routing: '{trigger}' matched -> {selected}")
+                    return selected
+
+        # No triggers matched, use default
+        logger.debug(f"Model routing: No triggers matched -> {default_model}")
+        return default_model
+
+    def chat(self, message: str, stream: bool = False, override_model: Optional[str] = None) -> str:
         """Send a chat message to Ollama.
 
         Args:
             message: User message to send.
             stream: Whether to stream the response.
+            override_model: Optional model to use instead of routing selection.
 
         Returns:
             Assistant's response.
@@ -41,6 +79,9 @@ class OllamaClient:
         Raises:
             Exception: If the request fails.
         """
+        # Select model based on message content (unless overridden)
+        selected_model = override_model or self._select_model(message)
+
         # Add user message to history
         self.conversation_history.append({
             "role": "user",
@@ -55,33 +96,39 @@ class OllamaClient:
 
         try:
             if stream:
-                return self._stream_chat()
+                return self._stream_chat(selected_model)
             else:
-                return self._standard_chat()
+                return self._standard_chat(selected_model)
         except Exception as e:
             logger.error(f"Error in chat: {e}")
             raise
 
-    def _standard_chat(self) -> str:
+    def _standard_chat(self, model: str) -> str:
         """Standard non-streaming chat.
+
+        Args:
+            model: Model name to use.
 
         Returns:
             Complete response from the model.
         """
         if self.model_type == "local":
-            return self._local_chat()
+            return self._local_chat(model)
         else:
             return self._cloud_chat()
 
-    def _local_chat(self) -> str:
+    def _local_chat(self, model: str) -> str:
         """Chat with local Ollama instance.
+
+        Args:
+            model: Model name to use.
 
         Returns:
             Model response.
         """
         try:
             response = ollama.chat(
-                model=self.model_config.model,
+                model=model,
                 messages=self.conversation_history,
                 options={
                     "temperature": self.model_config.temperature,
@@ -155,15 +202,18 @@ class OllamaClient:
             logger.error(f"Cloud Ollama error: {e}")
             raise Exception(f"Failed to communicate with cloud Ollama: {e}")
 
-    def _stream_chat(self) -> Generator[str, None, None]:
+    def _stream_chat(self, model: str) -> Generator[str, None, None]:
         """Stream chat responses.
+
+        Args:
+            model: Model name to use.
 
         Yields:
             Chunks of the response.
         """
         if self.model_type == "local":
             stream = ollama.chat(
-                model=self.model_config.model,
+                model=model,
                 messages=self.conversation_history,
                 stream=True,
                 options={
