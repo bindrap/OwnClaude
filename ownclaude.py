@@ -305,6 +305,82 @@ Provide:
         command_lower = command.lower().strip()
         return any(cmd in command_lower for cmd in safe_commands)
 
+    def _is_chat_question(self, user_input: str) -> bool:
+        """Determine if input is a chat question vs an action request.
+
+        Args:
+            user_input: The user's input.
+
+        Returns:
+            True if this appears to be a question.
+        """
+        question_indicators = ["what", "why", "how", "when", "where", "who", "tell me", "explain"]
+        action_indicators = ["create", "make", "write", "build", "delete", "modify", "open", "run"]
+
+        input_lower = user_input.lower()
+        has_question = any(word in input_lower for word in question_indicators)
+        has_action = any(word in input_lower for word in action_indicators)
+
+        return has_question and not has_action
+
+    def _execute_with_streaming(self, user_input: str, start_time: float) -> str:
+        """Execute command and stream the response in real-time.
+
+        Args:
+            user_input: The user's input.
+            start_time: When execution started.
+
+        Returns:
+            The complete response.
+        """
+        from rich.live import Live
+        from rich.text import Text
+
+        # Build the prompt
+        prompt = self.executor._build_augmented_prompt(
+            user_input,
+            self.conversation_history,
+            self.current_plan
+        )
+
+        # Stream the response
+        full_response = ""
+        display_text = Text()
+
+        with Live(display_text, console=self.console, refresh_per_second=10) as live:
+            for chunk in self.ollama.chat(prompt, stream=True):
+                full_response += chunk
+                display_text.append(chunk)
+                live.update(display_text)
+
+        # Parse to extract explanation if it's JSON
+        action_data = self.executor._parse_ai_response(full_response)
+        if action_data and action_data.get("action") == "chat":
+            final_response = action_data.get("explanation", full_response)
+        else:
+            final_response = full_response
+
+        # Calculate elapsed time
+        elapsed_time = time.time() - start_time
+        if elapsed_time < 1:
+            time_str = f"{elapsed_time*1000:.0f}ms"
+        else:
+            time_str = f"{elapsed_time:.2f}s"
+
+        # Update history
+        self._update_conversation_history("assistant", final_response)
+
+        # Show final formatted response
+        self.console.print()
+        self.console.print(Panel(
+            final_response,
+            title=f"[bold cyan]OwnClaude[/bold cyan] [dim]({time_str})[/dim]",
+            border_style="cyan"
+        ))
+        self.console.print()
+
+        return final_response
+
     def _update_conversation_history(self, role: str, content: str) -> None:
         """Add message to conversation history with smart context management."""
         self.conversation_history.append({
@@ -441,35 +517,43 @@ Provide:
                     if self.show_task_plan:
                         self._print_plan_preview(self.current_plan)
 
-                # Execute command
-                with self.console.status("[cyan]Thinking...[/cyan]"):
-                    try:
-                        response = self.executor.execute_command(
-                            user_input,
-                            context=self.conversation_history,
-                            plan=self.current_plan
-                        )
-                    except TypeError:
-                        # Fallback for executors that don't accept extra parameters
-                        response = self.executor.execute_command(user_input)
+                # Execute command with streaming for better UX
+                # Detect if this is likely a chat question vs an action
+                is_chat_question = self._is_chat_question(user_input)
 
-                # Calculate elapsed time
-                elapsed_time = time.time() - start_time
-
-                self._update_conversation_history("assistant", response)
-
-                # Format elapsed time nicely
-                if elapsed_time < 1:
-                    time_str = f"{elapsed_time*1000:.0f}ms"
+                if is_chat_question:
+                    # Stream the response for chat questions
+                    response = self._execute_with_streaming(user_input, start_time)
                 else:
-                    time_str = f"{elapsed_time:.2f}s"
+                    # Use normal execution for actions
+                    with self.console.status("[cyan]Thinking...[/cyan]"):
+                        try:
+                            response = self.executor.execute_command(
+                                user_input,
+                                context=self.conversation_history,
+                                plan=self.current_plan
+                            )
+                        except TypeError:
+                            # Fallback for executors that don't accept extra parameters
+                            response = self.executor.execute_command(user_input)
 
-                self.console.print(Panel(
-                    response,
-                    title=f"[bold cyan]OwnClaude[/bold cyan] [dim]({time_str})[/dim]",
-                    border_style="cyan"
-                ))
-                self.console.print()
+                    # Calculate elapsed time
+                    elapsed_time = time.time() - start_time
+
+                    self._update_conversation_history("assistant", response)
+
+                    # Format elapsed time nicely
+                    if elapsed_time < 1:
+                        time_str = f"{elapsed_time*1000:.0f}ms"
+                    else:
+                        time_str = f"{elapsed_time:.2f}s"
+
+                    self.console.print(Panel(
+                        response,
+                        title=f"[bold cyan]OwnClaude[/bold cyan] [dim]({time_str})[/dim]",
+                        border_style="cyan"
+                    ))
+                    self.console.print()
 
             except KeyboardInterrupt:
                 self.console.print("\n[yellow]Use 'exit' or 'quit' to leave.[/yellow]")
