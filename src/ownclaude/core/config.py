@@ -1,4 +1,4 @@
-"""Configuration management for OwnClaude."""
+"""Configuration management for PBOS AI."""
 
 import json
 import os
@@ -57,6 +57,7 @@ class InterfaceConfig(BaseModel):
     show_token_usage: bool = False
     auto_save_history: bool = True
     history_limit: int = 1000
+    ask_destination: bool = True
 
 
 class LoggingConfig(BaseModel):
@@ -226,7 +227,8 @@ class ConfigManager:
                 "show_timestamps": True,
                 "show_token_usage": False,
                 "auto_save_history": True,
-                "history_limit": 1000
+                "history_limit": 1000,
+                "ask_destination": True
             },
             "logging": {
                 "level": "INFO",

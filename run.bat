@@ -1,9 +1,9 @@
 @echo off
-REM OwnClaude GPU-Optimized Launcher
+REM PBOS AI GPU-Optimized Launcher
 REM This prevents CUDA out-of-memory errors on 4GB GPUs
 
 echo ========================================
-echo   OwnClaude GPU-Optimized Launcher
+echo   PBOS AI (Personal Bot OS) Launcher
 echo ========================================
 echo.
 echo Configuring Ollama for 4GB GPU...
@@ -37,7 +37,7 @@ echo   - Uses GPU for 18 layers (~3.5GB VRAM)
 echo   - Falls back to CPU for remaining 14 layers
 echo   - OPTIMIZED: Maximum performance on 4GB GPU
 echo.
-echo Starting OwnClaude...
+echo Starting PBOS AI...
 echo.
 
 REM Activate venv if it exists

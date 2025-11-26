@@ -1,4 +1,4 @@
-"""Safety and permissions system for OwnClaude."""
+"""Safety and permissions system for PBOS AI."""
 
 import json
 from datetime import datetime

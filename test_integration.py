@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Integration test to verify all OwnClaude modules work together."""
+"""Integration test to verify all PBOS AI modules work together."""
 
 import sys
 from pathlib import Path
@@ -41,7 +41,7 @@ def test_terminal_executor():
     executor = TerminalExecutor()
 
     # Test safe command
-    result = executor.execute("echo 'Hello from OwnClaude!'")
+    result = executor.execute("echo 'Hello from PBOS AI!'")
     assert result.success, "Echo command should succeed"
     print(f"✓ Safe command execution works")
 
@@ -146,7 +146,7 @@ def test_file_operations():
 def main():
     """Run all integration tests."""
     print("=" * 60)
-    print("OwnClaude Integration Test Suite")
+    print("PBOS AI Integration Test Suite")
     print("=" * 60)
     print()
 
@@ -161,7 +161,7 @@ def main():
         print("ALL TESTS PASSED! ✓")
         print("=" * 60)
         print()
-        print("OwnClaude is ready to use!")
+        print("PBOS AI is ready to use!")
         print("Run: python ownclaude.py")
 
     except Exception as e:
