@@ -13,14 +13,14 @@ echo Stopping existing Ollama server...
 taskkill /F /IM ollama.exe >nul 2>&1
 timeout /t 2 /nobreak >nul
 
-REM Set environment variables for Ollama (SAFE for 4GB GPU)
+REM Set environment variables for Ollama (OPTIMIZED for 3.5GB GPU usage)
 set OLLAMA_NUM_CTX=2048
-set OLLAMA_NUM_GPU=6
+set OLLAMA_NUM_GPU=18
 set OLLAMA_NUM_PARALLEL=1
 
 echo ✓ Context: 2048 tokens (reduced from 4096)
-echo ✓ GPU Layers: 6 of 32 (SAFE for 4GB GPU)
-echo ✓ Memory optimized for 4GB GPU
+echo ✓ GPU Layers: 18 of 32 (~3.5GB GPU usage)
+echo ✓ Memory optimized for maximum 4GB GPU performance
 echo.
 echo Starting Ollama server with optimized settings...
 
@@ -33,9 +33,9 @@ timeout /t 3 /nobreak >nul
 echo ✓ Ollama server started
 echo.
 echo This configuration:
-echo   - Uses GPU for 6 layers (modest speed boost)
-echo   - Falls back to CPU for remaining 26 layers
-echo   - SAFE: Won't crash with OOM errors on 4GB GPU
+echo   - Uses GPU for 18 layers (~3.5GB VRAM)
+echo   - Falls back to CPU for remaining 14 layers
+echo   - OPTIMIZED: Maximum performance on 4GB GPU
 echo.
 echo Starting OwnClaude...
 echo.

@@ -88,10 +88,22 @@ class FeaturesConfig(BaseModel):
     code_search_max_results: int = 50
 
 
+class ModelRoutingConfig(BaseModel):
+    """Model routing configuration."""
+    default_model: str = "qwen2.5:7b"
+    models: Dict[str, Any] = Field(default_factory=dict)
+
+    class Config:
+        """Pydantic config."""
+        extra = "allow"
+
+
 class Config(BaseModel):
     """Main configuration model."""
     model_type: str = "local"
+    enable_model_routing: bool = False
     ollama: OllamaConfig
+    model_routing: Optional[ModelRoutingConfig] = None
     system_permissions: SystemPermissions
     interface: InterfaceConfig
     logging: LoggingConfig
