@@ -306,16 +306,29 @@ Provide:
         return any(cmd in command_lower for cmd in safe_commands)
 
     def _update_conversation_history(self, role: str, content: str) -> None:
-        """Add message to conversation history with context management."""
+        """Add message to conversation history with smart context management."""
         self.conversation_history.append({
             "role": role,
             "content": content,
             "timestamp": datetime.now().isoformat()
         })
 
-        max_messages = getattr(self.config.features, "max_context_messages", 20)
+        max_messages = getattr(self.config.features, "max_context_messages", 10)
+
+        # Smart trimming: Keep recent messages + important context
         if len(self.conversation_history) > max_messages:
-            self.conversation_history = self.conversation_history[-max_messages:]
+            # Always keep the most recent messages
+            recent = self.conversation_history[-max_messages:]
+
+            # Keep important messages from earlier (file creations, errors, etc.)
+            important_keywords = ["created", "error", "warning", "file", "installed", "configured"]
+            important_old = [
+                msg for msg in self.conversation_history[:-max_messages]
+                if any(keyword in msg["content"].lower() for keyword in important_keywords)
+            ]
+
+            # Combine: up to 3 important old messages + all recent messages
+            self.conversation_history = important_old[-3:] + recent
 
     def run(self) -> None:
         """Run the interactive CLI with enhanced capabilities."""
@@ -416,8 +429,8 @@ Provide:
                 # Start timing
                 start_time = time.time()
 
-                # Plan task if enabled
-                if getattr(self.config.features, "enable_task_planning", True):
+                # Plan task if enabled (default False for speed)
+                if getattr(self.config.features, "enable_task_planning", False):
                     with self.console.status("[cyan]Planning task...[/cyan]"):
                         self.current_plan = self._plan_task(user_input)
 

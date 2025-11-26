@@ -80,7 +80,12 @@ class FeaturesConfig(BaseModel):
     enable_voice_input: bool = False
     enable_auto_completion: bool = True
     enable_context_awareness: bool = True
-    max_context_messages: int = 20
+    enable_task_planning: bool = False  # Disabled by default for speed
+    enable_code_analysis: bool = True
+    enable_git_integration: bool = True
+    max_context_messages: int = 10  # Reduced for faster responses
+    project_scan_depth: int = 5
+    code_search_max_results: int = 50
 
 
 class Config(BaseModel):
