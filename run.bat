@@ -8,18 +8,29 @@ echo ========================================
 echo.
 echo Configuring Ollama for 4GB GPU...
 
-REM Reduce context window to prevent OOM (2048 tokens = ~800MB GPU RAM)
+REM Stop existing Ollama instance
+echo Stopping existing Ollama server...
+taskkill /F /IM ollama.exe >nul 2>&1
+timeout /t 2 /nobreak >nul
+
+REM Set environment variables for Ollama
 set OLLAMA_NUM_CTX=2048
-
-REM Use hybrid GPU/CPU mode (offload 20 of 32 layers to GPU)
 set OLLAMA_NUM_GPU=20
-
-REM Reduce batch size to save memory
-set OLLAMA_MAX_BATCH=256
+set OLLAMA_NUM_PARALLEL=1
 
 echo ✓ Context: 2048 tokens (reduced from 4096)
 echo ✓ GPU Layers: 20 of 32 (hybrid mode)
-echo ✓ Batch Size: 256 (memory saver)
+echo ✓ Memory optimized for 4GB GPU
+echo.
+echo Starting Ollama server with optimized settings...
+
+REM Start Ollama server in background with settings
+start /B ollama serve
+
+REM Wait for Ollama to be ready
+timeout /t 3 /nobreak >nul
+
+echo ✓ Ollama server started
 echo.
 echo This configuration:
 echo   - Uses GPU for 60%% speed boost
@@ -35,5 +46,10 @@ if exist windowsVenv\Scripts\activate.bat (
 )
 
 python ownclaude.py
+
+REM Cleanup: Stop Ollama when done
+echo.
+echo Stopping Ollama server...
+taskkill /F /IM ollama.exe >nul 2>&1
 
 pause
