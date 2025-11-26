@@ -447,8 +447,14 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
         try:
             result = self._perform_action(action, params, operation)
             return f"{explanation}\n{result}"
+        except KeyError as e:
+            error_msg = f"Missing required parameter {str(e)} for action '{action}'. The AI model may be too small or not following the JSON format correctly."
+            self.safety.log_operation(operation, False, error_msg)
+            logger.error(f"Parameter error: {error_msg}")
+            return f"Failed to {action}: {error_msg}"
         except Exception as e:
             self.safety.log_operation(operation, False, str(e))
+            logger.error(f"Action execution error: {str(e)}")
             return f"Failed to {action}: {str(e)}"
 
     def _create_operation(
