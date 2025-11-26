@@ -417,16 +417,29 @@ Provide:
         Returns:
             True if this appears to be a question.
         """
-        question_indicators = ["what", "why", "how", "when", "where", "who", "tell me", "explain", "?", "can you"]
-        action_indicators = ["create", "make", "write", "build", "delete", "modify", "open", "run"]
+        question_indicators = ["what", "why", "how", "when", "where", "who", "tell me", "explain", "can you", "could you", "would you", "help me"]
+        action_indicators = [
+            "create", "make", "write", "build", "delete", "modify", "open", "run",
+            "update", "edit", "change", "fix", "improve", "add", "remove"
+        ]
 
-        input_lower = user_input.lower()
-        has_question = any(word in input_lower for word in question_indicators)
+        input_lower = user_input.lower().strip()
+
+        # Treat obvious question phrasing as a chat request, even if it contains action verbs
+        starts_like_question = input_lower.startswith(tuple(question_indicators))
+        has_question_mark = input_lower.endswith("?")
+        has_question_phrase = any(
+            phrase in input_lower for phrase in ["how do i", "how to", "what is", "tell me", "help me"]
+        )
+
         has_action = any(word in input_lower for word in action_indicators)
 
-        has_question_mark = user_input.strip().endswith("?")
+        # If the user is explicitly asking to perform a change (update/edit/etc.), treat it as an action.
+        if has_action:
+            return False
 
-        return (has_question or has_question_mark) and not has_action
+        # Otherwise fall back to question detection.
+        return starts_like_question or has_question_mark or has_question_phrase
 
     def _prompt_destination(self, session: "PromptSession") -> Optional[str]:
         """Ask the user where to route the current chat question."""
@@ -724,10 +737,15 @@ Provide:
 ╚══════════════════════════════════════════════════════════════╝
         """
         art = r"""
-              ___  ____   ___   ____      ___    ___    _      ___ 
-             | _ \| __ ) / _ \ | __ ) _ _| _ )  / _ \  | |    / _ \
-             |  _/|  _ \| | | ||  _ \| '_| _ \ | (_) | | |__ | (_) |
-             |_|  |_| \_\\___/ |____/|_| |___/  \___/  |____| \___/
+__/\\\\\\\\\\\\\____/\\\\\\\\\\\\\_________/\\\\\__________/\\\\\\\\\\\___        
+ _\/\\\/////////\\\_\/\\\/////////\\\_____/\\\///\\\______/\\\/////////\\\_       
+  _\/\\\_______\/\\\_\/\\\_______\/\\\___/\\\/__\///\\\___\//\\\______\///__      
+   _\/\\\\\\\\\\\\\/__\/\\\\\\\\\\\\\\___/\\\______\//\\\___\////\\\_________     
+    _\/\\\/////////____\/\\\/////////\\\_\/\\\_______\/\\\______\////\\\______    
+     _\/\\\_____________\/\\\_______\/\\\_\//\\\______/\\\__________\////\\\___   
+      _\/\\\_____________\/\\\_______\/\\\__\///\\\__/\\\_____/\\\______\//\\\__  
+       _\/\\\_____________\/\\\\\\\\\\\\\/_____\///\\\\\/_____\///\\\\\\\\\\\/___ 
+        _\///______________\/////////////_________\/////_________\///////////_____ 
         """
         self.console.print(f"[bold cyan]{banner}[/bold cyan]")
         self.console.print(f"[cyan]{art}[/cyan]")

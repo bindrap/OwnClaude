@@ -14,7 +14,7 @@ class OllamaLocalConfig(BaseModel):
     model: str = "llama3.2"
     temperature: float = 0.7
     top_p: float = 0.9
-    timeout: int = 30
+    timeout: int = 90
 
 
 class OllamaCloudConfig(BaseModel):
@@ -24,7 +24,7 @@ class OllamaCloudConfig(BaseModel):
     model: str = "llama3.2"
     temperature: float = 0.7
     top_p: float = 0.9
-    timeout: int = 60
+    timeout: int = 120
 
 
 class OllamaConfig(BaseModel):
@@ -57,7 +57,7 @@ class InterfaceConfig(BaseModel):
     show_token_usage: bool = False
     auto_save_history: bool = True
     history_limit: int = 1000
-    ask_destination: bool = True
+    ask_destination: bool = False
 
 
 class LoggingConfig(BaseModel):
@@ -199,7 +199,7 @@ class ConfigManager:
                     "model": "llama3.2",
                     "temperature": 0.7,
                     "top_p": 0.9,
-                    "timeout": 30
+                    "timeout": 90
                 },
                 "cloud": {
                     "api_key": "your-api-key-here",
@@ -207,7 +207,7 @@ class ConfigManager:
                     "model": "llama3.2",
                     "temperature": 0.7,
                     "top_p": 0.9,
-                    "timeout": 60
+                    "timeout": 120
                 }
             },
             "system_permissions": {

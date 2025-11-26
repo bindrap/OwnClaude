@@ -12,7 +12,7 @@
       "_comment_avoid": "AVOID: llama3.2:3b (too small, doesn't follow instructions)",
       "temperature": 0.3,
       "top_p": 0.8,
-      "timeout": 60
+      "timeout": 90
     },
     "cloud": {
       "api_key": "your-api-key-here",
@@ -20,7 +20,7 @@
       "model": "gpt-oss:120b-cloud",
       "temperature": 0.7,
       "top_p": 0.9,
-      "timeout": 60
+      "timeout": 120
     }
   },
   "system_permissions": {
@@ -41,7 +41,7 @@
     "show_token_usage": false,
     "auto_save_history": true,
     "history_limit": 1000,
-    "ask_destination": true
+    "ask_destination": false
   },
   "logging": {
     "level": "INFO",
