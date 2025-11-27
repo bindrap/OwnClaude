@@ -1,7 +1,9 @@
 """Context manager for maintaining project and folder awareness."""
 
 import ast
+import json
 import os
+import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Set
@@ -45,13 +47,16 @@ class ProjectContext:
         'shell': ['.sh', '.bash', '.zsh'],
     }
 
-    def __init__(self, root_path: Optional[Path] = None):
+    def __init__(self, root_path: Optional[Path] = None, cache_dir: Optional[Path] = None):
         """Initialize project context.
 
         Args:
             root_path: Root path of the project. Defaults to current directory.
+            cache_dir: Directory for cache files. Defaults to .ownclaude in root.
         """
         self.root_path = root_path or Path.cwd()
+        self.cache_dir = cache_dir or (self.root_path / ".ownclaude")
+        self.cache_file = self.cache_dir / "project_cache.json"
         self.file_tree: Dict[str, Any] = {}
         self.file_index: Dict[str, Path] = {}  # filename -> full path
         self.language_files: Dict[str, List[Path]] = defaultdict(list)
@@ -59,6 +64,7 @@ class ProjectContext:
         self.important_files: List[Path] = []
         self.cached_summaries: Dict[Path, str] = {}
         self._initialized = False
+        self._cache_max_age_seconds = 3600  # 1 hour
 
     def initialize(self, max_depth: int = 5) -> None:
         """Scan and index the project structure.
@@ -68,6 +74,14 @@ class ProjectContext:
         """
         logger.info(f"Initializing project context for: {self.root_path}")
 
+        # Try loading from cache first
+        if self._load_from_cache():
+            logger.info(f"Loaded project context from cache: {len(self.file_index)} files")
+            self._initialized = True
+            return
+
+        # Cache miss or stale - do full scan
+        logger.info("Cache miss or stale, performing full project scan...")
         self.file_tree = self._build_tree(self.root_path, max_depth)
         self.project_type = self._detect_project_type()
         self.important_files = self._find_important_files()
@@ -75,6 +89,9 @@ class ProjectContext:
         self._initialized = True
         logger.info(f"Project context initialized: {len(self.file_index)} files indexed")
         logger.info(f"Project type detected: {self.project_type or 'Unknown'}")
+
+        # Save to cache for next time
+        self._save_to_cache()
 
     def _build_tree(
         self,
@@ -207,6 +224,81 @@ class ProjectContext:
             important.extend([m for m in matches if m.is_file()])
 
         return important
+
+    def _load_from_cache(self) -> bool:
+        """Load project context from cache if available and fresh.
+
+        Returns:
+            True if cache was loaded successfully, False otherwise.
+        """
+        try:
+            if not self.cache_file.exists():
+                return False
+
+            # Check cache age
+            cache_age = time.time() - self.cache_file.stat().st_mtime
+            if cache_age > self._cache_max_age_seconds:
+                logger.debug(f"Cache is stale (age: {cache_age:.0f}s)")
+                return False
+
+            # Load cache
+            with open(self.cache_file, 'r', encoding='utf-8') as f:
+                cache_data = json.load(f)
+
+            # Reconstruct file_index and language_files
+            self.file_index = {name: Path(path) for name, path in cache_data.get('file_index', {}).items()}
+
+            # Reconstruct language_files
+            lang_files_dict = cache_data.get('language_files', {})
+            self.language_files = defaultdict(list)
+            for lang, paths in lang_files_dict.items():
+                self.language_files[lang] = [Path(p) for p in paths]
+
+            self.project_type = cache_data.get('project_type')
+            self.important_files = [Path(p) for p in cache_data.get('important_files', [])]
+
+            # Note: We don't cache file_tree as it's complex nested structure with Path objects
+            # Can be reconstructed if needed, but not essential for most operations
+
+            return True
+
+        except Exception as e:
+            logger.warning(f"Failed to load cache: {e}")
+            return False
+
+    def _save_to_cache(self) -> None:
+        """Save project context to cache."""
+        try:
+            # Create cache directory if it doesn't exist
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+            # Prepare cache data (convert Path objects to strings for JSON serialization)
+            cache_data = {
+                'timestamp': time.time(),
+                'root_path': str(self.root_path),
+                'file_index': {name: str(path) for name, path in self.file_index.items()},
+                'language_files': {lang: [str(p) for p in paths] for lang, paths in self.language_files.items()},
+                'project_type': self.project_type,
+                'important_files': [str(p) for p in self.important_files],
+            }
+
+            # Write cache
+            with open(self.cache_file, 'w', encoding='utf-8') as f:
+                json.dump(cache_data, f, indent=2)
+
+            logger.debug(f"Saved project context cache to {self.cache_file}")
+
+        except Exception as e:
+            logger.warning(f"Failed to save cache: {e}")
+
+    def invalidate_cache(self) -> None:
+        """Invalidate the cache file."""
+        try:
+            if self.cache_file.exists():
+                self.cache_file.unlink()
+                logger.info("Cache invalidated")
+        except Exception as e:
+            logger.warning(f"Failed to invalidate cache: {e}")
 
     def get_project_summary(self) -> str:
         """Generate a summary of the project structure.

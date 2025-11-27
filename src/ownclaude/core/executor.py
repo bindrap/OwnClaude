@@ -155,6 +155,20 @@ User: "open my email"
 
 Always wrap your JSON response in ```json``` code blocks, with nothing before or after the code block."""
 
+    # Cached prompt templates to avoid rebuilding each time
+    PROMPT_TEMPLATE_BASE = (
+        "\nIMPORTANT: You are working in directory: {cwd}\n"
+        "For file operations, use ONLY simple filenames like 'test.txt' or 'script.py'. "
+        "NEVER use '../' or parent directory paths. Files will be created in the current directory.\n"
+        "For factual questions, ALWAYS use the 'chat' action to answer directly. "
+        "Do NOT open URLs or search online for factual questions."
+    )
+
+    PROMPT_TEMPLATE_FOOTER = (
+        "\nAct now: produce exactly one JSON action object per system prompt, "
+        "wrapped in ```json``` with nothing else. Do not repeat or restate the task plan."
+    )
+
     def __init__(
         self,
         config: Config,
@@ -182,6 +196,9 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
 
         # Track last user input for validation
         self.last_user_input = ""
+
+        # Cache metrics
+        self.parsing_stats = {"success": 0, "fallback": 0, "failed": 0}
 
         # Set system prompt
         self.ollama.set_system_prompt(self.SYSTEM_PROMPT)
@@ -238,23 +255,14 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
     ) -> str:
         """Attach light context/plan hints to the user input for the model."""
         cwd = Path.cwd()
+
+        # Start with user input and cached base template
         parts = [
-            f"{user_input}"
+            user_input,
+            self.PROMPT_TEMPLATE_BASE.format(cwd=cwd)
         ]
 
-        # Emphasize current directory and path rules
-        parts.append(
-            f"\nIMPORTANT: You are working in directory: {cwd}"
-        )
-        parts.append(
-            "For file operations, use ONLY simple filenames like 'test.txt' or 'script.py'. "
-            "NEVER use '../' or parent directory paths. Files will be created in the current directory."
-        )
-        parts.append(
-            "For factual questions, ALWAYS use the 'chat' action to answer directly. "
-            "Do NOT open URLs or search online for factual questions."
-        )
-
+        # Add plan if available
         if plan:
             try:
                 plan_preview = json.dumps(plan, ensure_ascii=True)
@@ -262,6 +270,7 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
                 plan_preview = str(plan)
             parts.append(f"Current task plan: {plan_preview}")
 
+        # Add context if available
         if context:
             recent = context[-6:]  # limit to keep prompt compact
             context_lines = []
@@ -271,10 +280,8 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
                 context_lines.append(f"{role}: {content}")
             parts.append("Recent context:\n" + "\n".join(context_lines))
 
-        parts.append(
-            "Act now: produce exactly one JSON action object per system prompt, "
-            "wrapped in ```json``` with nothing else. Do not repeat or restate the task plan."
-        )
+        # Add cached footer template
+        parts.append(self.PROMPT_TEMPLATE_FOOTER)
 
         return "\n\n".join(parts)
 
@@ -287,6 +294,7 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
         Returns:
             Parsed action data or None if parsing failed.
         """
+        parsing_method = None
         try:
             def _extract_first_json(text: str) -> Optional[Any]:
                 """Try to grab the first JSON object from possibly noisy text."""
@@ -340,10 +348,16 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
             # Prefer the first block that includes an action
             for block in parsed_blocks:
                 if isinstance(block, dict) and "action" in block:
+                    parsing_method = "json_code_block"
+                    self.parsing_stats["success"] += 1
+                    logger.debug(f"Parsing stats: {self.parsing_stats}")
                     return block
 
             # Fall back to the first parsed block (e.g., plan JSON without action)
             if parsed_blocks:
+                parsing_method = "json_code_block_fallback"
+                self.parsing_stats["fallback"] += 1
+                logger.debug(f"Parsing stats: {self.parsing_stats}")
                 return {
                     "action": "chat",
                     "parameters": {},
@@ -355,7 +369,13 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
             normalized = _normalize_action(obj)
             if normalized:
                 if "action" in normalized:
+                    parsing_method = "raw_json"
+                    self.parsing_stats["success"] += 1
+                    logger.debug(f"Parsing stats: {self.parsing_stats}")
                     return normalized
+                parsing_method = "raw_json_fallback"
+                self.parsing_stats["fallback"] += 1
+                logger.debug(f"Parsing stats: {self.parsing_stats}")
                 return {
                     "action": "chat",
                     "parameters": {},
@@ -363,6 +383,9 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
                 }
 
             # Not structured JSON, treat as chat response
+            parsing_method = "text_fallback"
+            self.parsing_stats["fallback"] += 1
+            logger.debug(f"Parsing stats: {self.parsing_stats}")
             return {
                 "action": "chat",
                 "parameters": {},
@@ -370,7 +393,8 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
             }
 
         except Exception as e:
-            logger.error(f"Failed to parse AI response: {e}")
+            self.parsing_stats["failed"] += 1
+            logger.error(f"Failed to parse AI response: {e}. Parsing stats: {self.parsing_stats}")
             return None
 
     def _validate_response_content(self, action: str, explanation: str) -> tuple[bool, str]:

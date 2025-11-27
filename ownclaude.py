@@ -47,12 +47,11 @@ class OwnClaude:
         self.executor: Optional[CommandExecutor] = None
 
         # Enhanced features
-        self.conversation_history: List[Dict[str, Any]] = []
         self.current_plan: Optional[Dict[str, Any]] = None
         self.session_context: Dict[str, Any] = {}
         self.show_task_plan: bool = True
         self.exit_requested: bool = False
-        self.max_runtime_seconds: int = 90
+        self.max_runtime_seconds: int = 300  # Increased from 90 to 300 seconds (5 minutes)
         self.recommended_models = {
             "fast": ["phi3:mini", "gemma2:2b", "llama3.2:3b"],
             "balanced": ["llama3.1:8b", "mistral:7b", "qwen2.5:7b"],
@@ -245,7 +244,7 @@ class OwnClaude:
             future = executor.submit(
                 self.executor.execute_command,
                 user_input,
-                self.conversation_history,
+                self.ollama.get_display_history(),
                 self.current_plan,
             )
 
@@ -483,7 +482,7 @@ Provide:
         # Build the prompt
         prompt = self.executor._build_augmented_prompt(
             user_input,
-            self.conversation_history,
+            self.ollama.get_display_history(),
             self.current_plan
         )
 
@@ -517,9 +516,6 @@ Provide:
         else:
             time_str = f"{elapsed_time:.2f}s"
 
-        # Update history
-        self._update_conversation_history("assistant", final_response)
-
         # Show final formatted response
         self.console.print()
         self.console.print(Panel(
@@ -530,31 +526,6 @@ Provide:
         self.console.print()
 
         return final_response
-
-    def _update_conversation_history(self, role: str, content: str) -> None:
-        """Add message to conversation history with smart context management."""
-        self.conversation_history.append({
-            "role": role,
-            "content": content,
-            "timestamp": datetime.now().isoformat()
-        })
-
-        max_messages = getattr(self.config.features, "max_context_messages", 10)
-
-        # Smart trimming: Keep recent messages + important context
-        if len(self.conversation_history) > max_messages:
-            # Always keep the most recent messages
-            recent = self.conversation_history[-max_messages:]
-
-            # Keep important messages from earlier (file creations, errors, etc.)
-            important_keywords = ["created", "error", "warning", "file", "installed", "configured"]
-            important_old = [
-                msg for msg in self.conversation_history[:-max_messages]
-                if any(keyword in msg["content"].lower() for keyword in important_keywords)
-            ]
-
-            # Combine: up to 3 important old messages + all recent messages
-            self.conversation_history = important_old[-3:] + recent
 
     def run(self) -> None:
         """Run the interactive CLI with enhanced capabilities."""
@@ -601,7 +572,7 @@ Provide:
 
                 lower_input = user_input.lower()
 
-                self._update_conversation_history("user", user_input)
+                # User input will be added to history in the chat call
 
                 # Special commands
                 if lower_input in ['exit', 'quit', 'q']:
@@ -701,8 +672,6 @@ Provide:
                     # Calculate elapsed time
                     elapsed_time = time.time() - start_time
 
-                    self._update_conversation_history("assistant", response)
-
                     # Format elapsed time nicely
                     if elapsed_time < 1:
                         time_str = f"{elapsed_time*1000:.0f}ms"
@@ -754,7 +723,7 @@ __/\\\\\\\\\\\\\____/\\\\\\\\\\\\\_________/\\\\\__________/\\\\\\\\\\\___
         model_name = (self.config.ollama.local.model if model_type == "local"
                      else self.config.ollama.cloud.model)
         self.console.print(f"[dim]Using {model_type} model: {model_name}[/dim]")
-        self.console.print(f"[dim]Context messages: {len(self.conversation_history)}[/dim]")
+        self.console.print(f"[dim]Context messages: {self.ollama.get_history_count()}[/dim]")
 
     def _format_plan_steps(
         self,
@@ -888,13 +857,14 @@ Examples
         table.add_row("Rollback", "✓ Enabled" if self.config.security.enable_rollback else "✗ Disabled")
         table.add_row("Operation Logging", "✓ Enabled" if self.config.logging.log_operations else "✗ Disabled")
         table.add_row("Task Planning", "✓ Enabled" if getattr(features, "enable_task_planning", True) else "✗ Disabled")
-        table.add_row("Context Memory", f"✓ {len(self.conversation_history)} messages")
+        table.add_row("Context Memory", f"✓ {self.ollama.get_history_count()} messages")
 
         self.console.print(table)
 
     def _show_memory(self) -> None:
         """Show conversation memory."""
-        if not self.conversation_history:
+        conversation_history = self.ollama.get_display_history()
+        if not conversation_history:
             self.console.print("[yellow]No conversation history.[/yellow]")
             return
 
@@ -903,8 +873,8 @@ Examples
         table.add_column("Content", style="green")
         table.add_column("Time", style="dim")
 
-        for msg in self.conversation_history[-15:]:
-            timestamp = msg['timestamp'].split('T')[1].split('.')[0]
+        for msg in conversation_history[-15:]:
+            timestamp = msg.get('timestamp', '').split('T')[1].split('.')[0] if 'timestamp' in msg else 'N/A'
             content_preview = msg['content'][:60] + "..." if len(msg['content']) > 60 else msg['content']
             table.add_row(msg['role'], content_preview, timestamp)
 
@@ -983,7 +953,8 @@ Examples
         start_time = time.time()
         with self.console.status("[cyan]Reviewing code...[/cyan]"):
             last_code = ""
-            for msg in reversed(self.conversation_history):
+            conversation_history = self.ollama.get_display_history()
+            for msg in reversed(conversation_history):
                 if msg['role'] == 'assistant' and '```' in msg['content']:
                     last_code = msg['content']
                     break

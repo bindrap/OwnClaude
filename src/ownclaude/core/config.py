@@ -14,7 +14,7 @@ class OllamaLocalConfig(BaseModel):
     model: str = "llama3.2"
     temperature: float = 0.7
     top_p: float = 0.9
-    timeout: int = 90
+    timeout: int = 300  # Increased from 90 to 300 seconds (5 minutes)
 
 
 class OllamaCloudConfig(BaseModel):
@@ -24,7 +24,7 @@ class OllamaCloudConfig(BaseModel):
     model: str = "llama3.2"
     temperature: float = 0.7
     top_p: float = 0.9
-    timeout: int = 120
+    timeout: int = 300  # Increased from 120 to 300 seconds (5 minutes)
 
 
 class OllamaConfig(BaseModel):
@@ -199,7 +199,7 @@ class ConfigManager:
                     "model": "llama3.2",
                     "temperature": 0.7,
                     "top_p": 0.9,
-                    "timeout": 90
+                    "timeout": 300
                 },
                 "cloud": {
                     "api_key": "your-api-key-here",
@@ -207,7 +207,7 @@ class ConfigManager:
                     "model": "llama3.2",
                     "temperature": 0.7,
                     "top_p": 0.9,
-                    "timeout": 120
+                    "timeout": 300
                 }
             },
             "system_permissions": {
