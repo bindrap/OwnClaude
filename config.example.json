@@ -6,7 +6,7 @@
   "ollama": {
     "local": {
       "host": "http://localhost:11434",
-      "model": "llama3.1:8b",
+      "model": "qwen3:4b",
       "_comment_model_options": "Recommended: llama3.1:8b, mistral:7b, qwen2.5:7b, deepseek-coder:6.7b",
       "_comment_faster_models": "For speed: phi3:mini (2x faster), gemma:2b (3x faster)",
       "_comment_avoid": "AVOID: llama3.2:3b (too small, doesn't follow instructions)",
@@ -27,7 +27,7 @@
     "allow_app_control": true,
     "allow_file_operations": true,
     "allow_browser_control": true,
-    "allow_system_commands": false,
+    "allow_system_commands": true,
     "require_confirmation": {
       "file_deletion": true,
       "app_closure": false,
@@ -69,8 +69,8 @@
     "_comment_planning": "Task planning disabled for 30-40% speed boost. Enable for complex multi-step tasks.",
     "enable_code_analysis": true,
     "enable_git_integration": true,
-    "max_context_messages": 24,
-    "_comment_context": "Increased for better memory. Reduce if you want lower latency.",
+    "max_context_messages": 12,
+    "_comment_context": "Reduced for lower latency.",
     "project_scan_depth": 5,
     "code_search_max_results": 50
   }

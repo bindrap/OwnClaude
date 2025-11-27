@@ -557,12 +557,7 @@ Provide:
             fallback_response = self._run_with_timeout(user_input)
             elapsed_time = time.time() - start_time
             time_str = f"{elapsed_time*1000:.0f}ms" if elapsed_time < 1 else f"{elapsed_time:.2f}s"
-            self.console.print(Panel(
-                fallback_response,
-                title=f"[bold cyan]PBOS AI[/bold cyan] [dim]({time_str})[/dim]",
-                border_style="cyan"
-            ))
-            self.console.print()
+            self._print_response_panel(fallback_response, time_str)
             return fallback_response
         except Exception as exc:
             self.console.print(
@@ -571,12 +566,7 @@ Provide:
             fallback_response = self._run_with_timeout(user_input)
             elapsed_time = time.time() - start_time
             time_str = f"{elapsed_time*1000:.0f}ms" if elapsed_time < 1 else f"{elapsed_time:.2f}s"
-            self.console.print(Panel(
-                fallback_response,
-                title=f"[bold cyan]PBOS AI[/bold cyan] [dim]({time_str})[/dim]",
-                border_style="cyan"
-            ))
-            self.console.print()
+            self._print_response_panel(fallback_response, time_str)
             return fallback_response
 
         # Parse to extract explanation if it's JSON
@@ -594,15 +584,25 @@ Provide:
             time_str = f"{elapsed_time:.2f}s"
 
         # Show final formatted response
-        self.console.print()
-        self.console.print(Panel(
-            final_response,
-            title=f"[bold cyan]PBOS AI[/bold cyan] [dim]({time_str})[/dim]",
-            border_style="cyan"
-        ))
-        self.console.print()
+        self._print_response_panel(final_response, time_str)
 
         return final_response
+
+    def _print_response_panel(self, content: str, time_str: str) -> None:
+        """Render bot responses in purple with Markdown formatting."""
+        try:
+            renderable = Markdown(content, code_theme="monokai")
+        except Exception:
+            renderable = content
+
+        self.console.print()
+        self.console.print(Panel(
+            renderable,
+            title=f"[bold magenta]PBOS AI[/bold magenta] [dim]({time_str})[/dim]",
+            border_style="magenta",
+            style="magenta"
+        ))
+        self.console.print()
 
     def run(self) -> None:
         """Run the interactive CLI with enhanced capabilities."""
@@ -748,12 +748,7 @@ Provide:
 
                         elapsed_time = time.time() - start_time
                         time_str = f"{elapsed_time*1000:.0f}ms" if elapsed_time < 1 else f"{elapsed_time:.2f}s"
-                        self.console.print(Panel(
-                            response,
-                            title=f"[bold cyan]PBOS AI[/bold cyan] [dim]({time_str})[/dim]",
-                            border_style="cyan"
-                        ))
-                        self.console.print()
+                        self._print_response_panel(response, time_str)
                 else:
                     # Use normal execution for actions
                     with self.console.status("[cyan]Thinking...[/cyan]"):
@@ -768,12 +763,7 @@ Provide:
                     else:
                         time_str = f"{elapsed_time:.2f}s"
 
-                    self.console.print(Panel(
-                        response,
-                        title=f"[bold cyan]PBOS AI[/bold cyan] [dim]({time_str})[/dim]",
-                        border_style="cyan"
-                    ))
-                    self.console.print()
+                    self._print_response_panel(response, time_str)
 
             except KeyboardInterrupt:
                 self.console.print("\n[yellow]Interrupted. Exiting...[/yellow]")
