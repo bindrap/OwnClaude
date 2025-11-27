@@ -4,7 +4,7 @@ import hashlib
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
-from typing import Dict, List, Optional, Generator, Tuple
+from typing import Dict, List, Optional, Generator, Tuple, Any
 
 import ollama
 import requests
