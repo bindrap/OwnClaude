@@ -14,7 +14,9 @@ taskkill /F /IM ollama.exe >nul 2>&1
 timeout /t 2 /nobreak >nul
 
 REM Set environment variables for Ollama (OPTIMIZED for 3.5GB GPU usage)
-set OLLAMA_NUM_CTX=2048
+REM Lower context for faster load/response on 4GB GPUs
+set OLLAMA_CONTEXT_LENGTH=1024
+set OLLAMA_NUM_CTX=1024
 set OLLAMA_NUM_GPU=18
 set OLLAMA_NUM_PARALLEL=1
 

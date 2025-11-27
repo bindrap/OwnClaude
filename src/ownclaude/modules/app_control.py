@@ -1,5 +1,6 @@
 """Application control module for opening and managing applications."""
 
+import os
 import platform
 import subprocess
 from pathlib import Path
@@ -50,6 +51,10 @@ class AppController:
         """
         # Common Windows applications
         app_mappings = {
+            "vscode": "code",
+            "vs code": "code",
+            "visual studio code": "code",
+            "code": "code",
             "notepad": "notepad.exe",
             "calculator": "calc.exe",
             "paint": "mspaint.exe",
@@ -64,6 +69,18 @@ class AppController:
         }
 
         app_to_open = app_mappings.get(app_name.lower(), app_name)
+
+        # Special handling for VS Code to find the actual executable if "code" isn't on PATH
+        if app_to_open.lower() == "code":
+            candidates = [
+                Path(os.environ.get("ProgramFiles", "")) / "Microsoft VS Code" / "Code.exe",
+                Path(os.environ.get("ProgramFiles(x86)", "")) / "Microsoft VS Code" / "Code.exe",
+                Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Microsoft VS Code" / "Code.exe",
+            ]
+            for candidate in candidates:
+                if candidate.is_file():
+                    app_to_open = str(candidate)
+                    break
 
         try:
             subprocess.Popen(app_to_open, shell=True)
