@@ -272,7 +272,9 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
 
         # Add context if available
         if context:
-            recent = context[-6:]  # limit to keep prompt compact
+            # Respect configured memory while keeping prompt compact
+            context_window = max(6, min(self.config.features.max_context_messages, 12))
+            recent = context[-context_window:]
             context_lines = []
             for item in recent:
                 role = item.get("role", "user")

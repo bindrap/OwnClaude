@@ -112,6 +112,9 @@ class OllamaClient:
         Raises:
             Exception: If the request fails.
         """
+        # Compact history to avoid long prompts / truncation
+        self._shrink_history(max_messages=6, max_chars=2000)
+
         # Select model based on message content (unless overridden)
         selected_model = override_model or self._select_model(message)
 
@@ -246,7 +249,9 @@ class OllamaClient:
         Yields:
             Chunks of the response.
         """
-        stall_timeout = getattr(self.model_config, "timeout", 60) or 60
+        # Keep stall timeout bounded so we bail out instead of hanging forever
+        configured_timeout = getattr(self.model_config, "timeout", 60) or 60
+        stall_timeout = min(configured_timeout, 90)
 
         if self.model_type == "local":
             stream = ollama.chat(
@@ -439,6 +444,25 @@ class OllamaClient:
 
             # Combine: up to 3 important old messages + all recent messages
             self.conversation_history = important_old[-3:] + recent
+
+    def _shrink_history(self, max_messages: int = 6, max_chars: int = 2000) -> None:
+        """Trim conversation history aggressively to avoid prompt truncation and repeated answers."""
+        # Limit by message count first
+        if len(self.conversation_history) > max_messages:
+            self.conversation_history = self.conversation_history[-max_messages:]
+
+        # Limit by total character length
+        total_chars = sum(len(msg.get("content", "")) for msg in self.conversation_history)
+        if total_chars > max_chars:
+            trimmed: list[Dict[str, Any]] = []
+            running = 0
+            for msg in reversed(self.conversation_history):
+                content_len = len(msg.get("content", ""))
+                if running + content_len > max_chars:
+                    break
+                trimmed.append(msg)
+                running += content_len
+            self.conversation_history = list(reversed(trimmed))
 
     def get_display_history(self) -> List[Dict[str, Any]]:
         """Get conversation history for display purposes.

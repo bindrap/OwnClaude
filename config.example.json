@@ -12,7 +12,7 @@
       "_comment_avoid": "AVOID: llama3.2:3b (too small, doesn't follow instructions)",
       "temperature": 0.3,
       "top_p": 0.8,
-      "timeout": 90
+      "timeout": 300
     },
     "cloud": {
       "api_key": "your-api-key-here",
@@ -20,7 +20,7 @@
       "model": "gpt-oss:120b-cloud",
       "temperature": 0.7,
       "top_p": 0.9,
-      "timeout": 120
+      "timeout": 300
     }
   },
   "system_permissions": {
@@ -41,7 +41,7 @@
     "show_token_usage": false,
     "auto_save_history": true,
     "history_limit": 1000,
-    "ask_destination": false
+    "ask_destination": true
   },
   "logging": {
     "level": "INFO",
@@ -69,8 +69,8 @@
     "_comment_planning": "Task planning disabled for 30-40% speed boost. Enable for complex multi-step tasks.",
     "enable_code_analysis": true,
     "enable_git_integration": true,
-    "max_context_messages": 10,
-    "_comment_context": "Reduced from 20 to 10 for faster responses. Increase if you need longer conversation memory.",
+    "max_context_messages": 24,
+    "_comment_context": "Increased for better memory. Reduce if you want lower latency.",
     "project_scan_depth": 5,
     "code_search_max_results": 50
   }

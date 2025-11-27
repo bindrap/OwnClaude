@@ -57,7 +57,7 @@ class InterfaceConfig(BaseModel):
     show_token_usage: bool = False
     auto_save_history: bool = True
     history_limit: int = 1000
-    ask_destination: bool = False
+    ask_destination: bool = True
 
 
 class LoggingConfig(BaseModel):
@@ -84,7 +84,7 @@ class FeaturesConfig(BaseModel):
     enable_task_planning: bool = False  # Disabled by default for speed
     enable_code_analysis: bool = True
     enable_git_integration: bool = True
-    max_context_messages: int = 10  # Reduced for faster responses
+    max_context_messages: int = 24  # Bigger context for better memory without huge prompts
     project_scan_depth: int = 5
     code_search_max_results: int = 50
 
@@ -252,7 +252,7 @@ class ConfigManager:
                 "enable_voice_input": False,
                 "enable_auto_completion": True,
                 "enable_context_awareness": True,
-                "max_context_messages": 20
+                "max_context_messages": 24
             }
         }
 

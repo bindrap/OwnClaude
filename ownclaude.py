@@ -236,9 +236,14 @@ class OwnClaude:
             border_style="cyan"
         ))
 
-    def _run_with_timeout(self, user_input: str) -> str:
+    def _get_active_model_config(self):
+        """Return the active model configuration (local or cloud)."""
+        return self.config.ollama.local if self.config.model_type == "local" else self.config.ollama.cloud
+
+    def _run_with_timeout(self, user_input: str, allow_fallback: bool = True) -> str:
         """Execute the command with a hard timeout to avoid hangs."""
-        timeout = getattr(self.config.ollama.local, "timeout", self.max_runtime_seconds)
+        active_model_config = self._get_active_model_config()
+        timeout = getattr(active_model_config, "timeout", None) or self.max_runtime_seconds
 
         with ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(
@@ -250,11 +255,25 @@ class OwnClaude:
 
             try:
                 return future.result(timeout=timeout)
+            except KeyboardInterrupt:
+                future.cancel()
+                self.exit_requested = True
+                raise
             except FuturesTimeout:
                 future.cancel()
-                self.console.print(
-                    "[red]Response took too long and was cancelled. Try 'use cloud' for faster answers or switch to a smaller local model.[/red]"
-                )
+                if allow_fallback and self.config.model_type == "local":
+                    self.console.print(
+                        "[yellow]Local response timed out. Trying cloud instead...[/yellow]"
+                    )
+                    try:
+                        self._switch_model_source("cloud")
+                        return self._run_with_timeout(user_input, allow_fallback=False)
+                    except Exception as fallback_exc:
+                        self.console.print(f"[red]Cloud fallback failed: {fallback_exc}[/red]")
+                else:
+                    self.console.print(
+                        "[red]Response took too long and was cancelled. Try 'use cloud' for faster answers or switch to a smaller local model.[/red]"
+                    )
                 raise
             except TypeError:
                 # Fallback for executors that don't accept extra parameters
@@ -263,10 +282,33 @@ class OwnClaude:
                     return future.result(timeout=timeout)
                 except FuturesTimeout:
                     future.cancel()
-                    self.console.print(
-                        "[red]Response took too long and was cancelled. Try 'use cloud' for faster answers or switch to a smaller local model.[/red]"
-                    )
+                    if allow_fallback and self.config.model_type == "local":
+                        self.console.print(
+                            "[yellow]Local response timed out. Trying cloud instead...[/yellow]"
+                        )
+                        try:
+                            self._switch_model_source("cloud")
+                            return self._run_with_timeout(user_input, allow_fallback=False)
+                        except Exception as fallback_exc:
+                            self.console.print(f"[red]Cloud fallback failed: {fallback_exc}[/red]")
+                    else:
+                        self.console.print(
+                            "[red]Response took too long and was cancelled. Try 'use cloud' for faster answers or switch to a smaller local model.[/red]"
+                        )
                     raise
+            except Exception as exc:
+                future.cancel()
+                # If local failed, try automatic cloud fallback once
+                if allow_fallback and self.config.model_type == "local":
+                    self.console.print(
+                        f"[yellow]Local model failed ({exc}). Trying cloud instead...[/yellow]"
+                    )
+                    try:
+                        self._switch_model_source("cloud")
+                        return self._run_with_timeout(user_input, allow_fallback=False)
+                    except Exception as fallback_exc:
+                        self.console.print(f"[red]Cloud fallback failed: {fallback_exc}[/red]")
+                raise
     def _plan_task(self, user_input: str) -> Dict[str, Any]:
         """Generate a task plan before execution."""
         self.console.print("[cyan]Creating task plan...[/cyan]")
@@ -421,6 +463,10 @@ Provide:
             "create", "make", "write", "build", "delete", "modify", "open", "run",
             "update", "edit", "change", "fix", "improve", "add", "remove"
         ]
+        creative_requests = [
+            "story", "poem", "song", "lyrics", "essay", "script", "scene",
+            "joke", "tweet", "post", "narrative", "chapter", "fanfic", "fan fiction"
+        ]
 
         input_lower = user_input.lower().strip()
 
@@ -432,8 +478,13 @@ Provide:
         )
 
         has_action = any(word in input_lower for word in action_indicators)
+        is_creative = any(word in input_lower for word in creative_requests)
 
-        # If the user is explicitly asking to perform a change (update/edit/etc.), treat it as an action.
+        # Creative writing requests should be treated as chat (streamed) even if they contain action verbs
+        if is_creative:
+            return True
+
+        # Creative writing should be treated as chat even if it contains "write/make"
         if has_action:
             return False
 
@@ -496,11 +547,37 @@ Provide:
                     full_response += chunk
                     display_text.append(chunk)
                     live.update(display_text)
+        except KeyboardInterrupt:
+            self.exit_requested = True
+            raise
         except TimeoutError:
             self.console.print(
-                "\n[red]The model stopped responding. Try 'use cloud' for instant answers or switch to a smaller local model.[/red]"
+                "\n[red]The model stopped responding. Trying a non-streamed retry...[/red]"
             )
-            return ""
+            fallback_response = self._run_with_timeout(user_input)
+            elapsed_time = time.time() - start_time
+            time_str = f"{elapsed_time*1000:.0f}ms" if elapsed_time < 1 else f"{elapsed_time:.2f}s"
+            self.console.print(Panel(
+                fallback_response,
+                title=f"[bold cyan]PBOS AI[/bold cyan] [dim]({time_str})[/dim]",
+                border_style="cyan"
+            ))
+            self.console.print()
+            return fallback_response
+        except Exception as exc:
+            self.console.print(
+                f"\n[red]Streaming failed ({exc}). Trying a non-streamed retry...[/red]"
+            )
+            fallback_response = self._run_with_timeout(user_input)
+            elapsed_time = time.time() - start_time
+            time_str = f"{elapsed_time*1000:.0f}ms" if elapsed_time < 1 else f"{elapsed_time:.2f}s"
+            self.console.print(Panel(
+                fallback_response,
+                title=f"[bold cyan]PBOS AI[/bold cyan] [dim]({time_str})[/dim]",
+                border_style="cyan"
+            ))
+            self.console.print()
+            return fallback_response
 
         # Parse to extract explanation if it's JSON
         action_data = self.executor._parse_ai_response(full_response)
@@ -662,8 +739,21 @@ Provide:
                     if route_choice and route_choice != self.config.model_type:
                         self._switch_model_source(route_choice)
 
-                    # Stream the response for chat questions
-                    response = self._execute_with_streaming(user_input, start_time)
+                    # Prefer streaming for cloud, use non-stream for local to avoid stalls
+                    if self.config.model_type == "cloud":
+                        response = self._execute_with_streaming(user_input, start_time)
+                    else:
+                        with self.console.status("[cyan]Thinking...[/cyan]"):
+                            response = self._run_with_timeout(user_input)
+
+                        elapsed_time = time.time() - start_time
+                        time_str = f"{elapsed_time*1000:.0f}ms" if elapsed_time < 1 else f"{elapsed_time:.2f}s"
+                        self.console.print(Panel(
+                            response,
+                            title=f"[bold cyan]PBOS AI[/bold cyan] [dim]({time_str})[/dim]",
+                            border_style="cyan"
+                        ))
+                        self.console.print()
                 else:
                     # Use normal execution for actions
                     with self.console.status("[cyan]Thinking...[/cyan]"):
@@ -686,7 +776,8 @@ Provide:
                     self.console.print()
 
             except KeyboardInterrupt:
-                self.console.print("\n[yellow]Use 'exit' or 'quit' to leave.[/yellow]")
+                self.console.print("\n[yellow]Interrupted. Exiting...[/yellow]")
+                break
             except EOFError:
                 break
             except FuturesTimeout:
