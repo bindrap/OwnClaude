@@ -474,8 +474,9 @@ Provide:
         starts_like_question = input_lower.startswith(tuple(question_indicators))
         has_question_mark = input_lower.endswith("?")
         has_question_phrase = any(
-            phrase in input_lower for phrase in ["how do i", "how to", "what is", "tell me", "help me"]
+            phrase in input_lower for phrase in ["how do i", "how to", "what is", "tell me", "help me", "give me", "walk me through"]
         )
+        request_for_steps = any(word in input_lower for word in ["outline", "steps", "guide", "instructions", "list out", "walkthrough", "walk-through"])
 
         has_action = any(word in input_lower for word in action_indicators)
         is_creative = any(word in input_lower for word in creative_requests)
@@ -484,12 +485,12 @@ Provide:
         if is_creative:
             return True
 
-        # Creative writing should be treated as chat even if it contains "write/make"
-        if has_action:
-            return False
+        # If it reads like a question, treat it as chat even if action verbs appear.
+        if starts_like_question or has_question_mark or has_question_phrase or request_for_steps:
+            return True
 
-        # Otherwise fall back to question detection.
-        return starts_like_question or has_question_mark or has_question_phrase
+        # Otherwise fall back to action detection.
+        return not has_action
 
     def _prompt_destination(self, session: "PromptSession") -> Optional[str]:
         """Ask the user where to route the current chat question."""
