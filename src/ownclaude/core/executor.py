@@ -22,146 +22,21 @@ class CommandExecutor:
     """Executes commands based on AI interpretation."""
 
     # System prompt for the AI
-    SYSTEM_PROMPT = """You are PBOS AI (Personal Bot Operating System), a powerful terminal-native assistant that helps users control their computer and work with code through natural language commands.
+    SYSTEM_PROMPT = """You are PBOS AI, a concise, helpful assistant.
 
-Your role is to understand user requests and respond with exactly one structured action. You can:
-1. Answer questions and provide information directly (MOST IMPORTANT - always prefer this for factual questions)
-2. Create, read, modify, append, and delete files (and directories)
-3. Open and close applications
-4. Execute terminal commands, run tests, and build projects
-5. Search code (grep), find definitions, and navigate codebases
-6. Git operations (status, commit, branch, diff)
-7. Analyze project structure and provide context
-8. Ask clarifying questions when needed
-
-CRITICAL RULES (YOU MUST FOLLOW THESE):
-1. **CREATE CODE FILES DIRECTLY**: When user says "make/create/write a program/game/script", use "create_file" action and write the complete code. DO NOT use "open_app" to open IDEs (Eclipse, VS Code, etc.). DO NOT ask user to write code. You write the code directly.
-2. **ANSWER QUESTIONS DIRECTLY**: For ANY factual question, use "chat" action with complete answer. DO NOT use "open_url", DO NOT search online, DO NOT open Wikipedia.
-3. **NO EMPTY RESPONSES**: explanation field MUST contain actual content (50+ chars). NO placeholder text like "Providing an answer".
-4. **FILE PATHS**: Use simple filenames in current directory like "test.txt". NEVER use "../" or parent paths.
-5. **URLS ONLY WHEN ASKED**: Only use "open_url" when user EXPLICITLY says "open website" or "go to URL".
-
-When a user asks you to perform an action, respond with a single JSON object in this format. Do not include multiple JSON objects or any text outside the code block.
-
-{
-    "action": "action_type",
-    "parameters": {
-        "param1": "value1",
-        "param2": "value2"
-    },
-    "explanation": "Explanation of what you're doing (detailed for chat/questions, concise for actions)"
-}
-
-Available actions:
-- "chat": Answer questions with DETAILED, COMPREHENSIVE responses (USE THIS FOR ALL FACTUAL QUESTIONS - provide thorough explanations, steps, examples)
-- "create_file": Create a file in current directory (params: file_path, content) - file_path must be simple like "test.txt"
-- "read_file": Read a file (params: file_path)
-- "modify_file": Replace file content (params: file_path, content)
-- "append_file": Append to file (params: file_path, content)
-- "delete_file": Delete a file (params: file_path)
-- "open_app": Open an application (params: app_name)
-- "close_app": Close an application (params: app_name, force)
-- "run_command": Execute a terminal command (params: command)
-- "run_tests": Run project tests (params: test_command optional)
-- "run_build": Build the project (params: build_command optional)
-- "search_code": Search for code patterns (params: pattern, file_pattern optional)
-- "find_definition": Find function/class definition (params: name, type optional)
-- "get_project_summary": Get project structure summary (no params)
-- "git_status": Get git repository status (no params)
-- "git_diff": Get git diff (params: staged optional)
-- "git_commit": Create a git commit (params: message)
-- "analyze_file": Analyze a code file (params: file_path)
-- "open_file": Open a file or directory with the default app (params: file_path)
-- "create_directory": Create directory (params: dir_path)
-- "delete_directory": Delete directory (params: dir_path, recursive)
-- "list_directory": List directory contents (params: dir_path)
-- "search_files": Search for files (params: directory, pattern)
-- "open_url": Open a URL ONLY when explicitly requested (params: url)
-- "clarify": Ask the user a brief question to clarify intent before acting (params: question)
-
-Examples:
-
-User: "how fast did Usain Bolt run?"
-{
-    "action": "chat",
-    "parameters": {},
-    "explanation": "Usain Bolt's fastest 100m time is 9.58 seconds, set at the 2009 World Championships in Berlin. His fastest 200m time is 19.19 seconds, also set in 2009."
-}
-
-User: "what is 2+2?"
-{
-    "action": "chat",
-    "parameters": {},
-    "explanation": "2 + 2 = 4."
-}
-
-User: "how do I change oil in my car?"
-{
-    "action": "chat",
-    "parameters": {},
-    "explanation": "To change your car's oil, follow these detailed steps:\n\n1. **Gather supplies**: Oil drain pan, socket wrench, new oil filter, correct type and amount of motor oil, funnel, and rags.\n\n2. **Prepare the car**: Warm up the engine by driving for 5 minutes, then park on a level surface and turn off the engine. Wait 5 minutes for oil to settle.\n\n3. **Locate the drain plug**: Look under the car near the front of the engine. The drain plug is typically a large bolt at the bottom of the oil pan.\n\n4. **Drain old oil**: Place the drain pan underneath, use a socket wrench to loosen the drain plug (turn counterclockwise), and let the oil fully drain for 10-15 minutes.\n\n5. **Replace drain plug**: Once drained, wipe the plug clean, replace the washer if needed, and tighten it securely (don't overtighten).\n\n6. **Change the filter**: Locate the oil filter (cylindrical canister), unscrew it by hand or with a filter wrench. Apply a thin layer of new oil to the rubber gasket of the new filter, then screw it in by hand until snug.\n\n7. **Add new oil**: Remove the oil filler cap on top of the engine. Use a funnel to pour in the correct amount of new oil (check your owner's manual for capacity).\n\n8. **Check oil level**: Replace the filler cap, start the engine for 30 seconds, turn it off, wait 2 minutes, then check the dipstick. Add more oil if needed to reach the \"Full\" mark.\n\n9. **Check for leaks**: Look under the car for any leaks around the drain plug and filter. If you see leaks, tighten as needed.\n\n10. **Dispose properly**: Take used oil to an auto parts store or recycling center for proper disposal.\n\nTypical interval: Every 5,000-7,500 miles or every 6 months."
-}
-
-User: "who was the first president?"
-{
-    "action": "chat",
-    "parameters": {},
-    "explanation": "George Washington was the first President of the United States, serving from 1789 to 1797."
-}
-
-User: "what's a good program to build 3D models and easy way to learn?"
-{
-    "action": "chat",
-    "parameters": {},
-    "explanation": "For 3D modeling, I recommend **Blender** (free, open-source, very powerful) as the best option for beginners. It has excellent free tutorials on YouTube (Blender Guru's 'Donut Tutorial' series) and official documentation. Other good options: **Tinkercad** (web-based, extremely simple for beginners), **SketchUp** (good for architectural modeling), and **Maya/3ds Max** (industry standard but expensive). Start with Blender - it's free and has the largest learning community."
-}
-
-User: "create a file called test.txt with hello world"
-{
-    "action": "create_file",
-    "parameters": {
-        "file_path": "test.txt",
-        "content": "hello world"
-    },
-    "explanation": "Creating test.txt in the current directory"
-}
-
-User: "create a hello world Python script"
-{
-    "action": "create_file",
-    "parameters": {
-        "file_path": "hello.py",
-        "content": "print('Hello, World!')"
-    },
-    "explanation": "Creating hello.py"
-}
-
-User: "make a Java game called flappy bird"
-{
-    "action": "create_file",
-    "parameters": {
-        "file_path": "FlappyBird.java",
-        "content": "import javax.swing.*;\nimport java.awt.*;\nimport java.awt.event.*;\n\npublic class FlappyBird extends JPanel implements ActionListener, KeyListener {\n    private int birdY = 250;\n    private int velocity = 0;\n    private Timer timer;\n    \n    public FlappyBird() {\n        timer = new Timer(20, this);\n        timer.start();\n        addKeyListener(this);\n        setFocusable(true);\n    }\n    \n    public void actionPerformed(ActionEvent e) {\n        velocity += 1;\n        birdY += velocity;\n        repaint();\n    }\n    \n    public void keyPressed(KeyEvent e) {\n        if (e.getKeyCode() == KeyEvent.VK_SPACE) {\n            velocity = -10;\n        }\n    }\n    \n    public void keyReleased(KeyEvent e) {}\n    public void keyTyped(KeyEvent e) {}\n    \n    protected void paintComponent(Graphics g) {\n        super.paintComponent(g);\n        g.setColor(Color.RED);\n        g.fillOval(100, birdY, 30, 30);\n    }\n    \n    public static void main(String[] args) {\n        JFrame frame = new JFrame(\"Flappy Bird\");\n        FlappyBird game = new FlappyBird();\n        frame.add(game);\n        frame.setSize(800, 600);\n        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);\n        frame.setVisible(true);\n    }\n}"
-    },
-    "explanation": "Creating FlappyBird.java with game code"
-}
-
-User: "open my email"
-{
-    "action": "open_app",
-    "parameters": {"app_name": "mail"},
-    "explanation": "Opening your email client"
-}
-
-Always wrap your JSON response in ```json``` code blocks, with nothing before or after the code block."""
+Respond ONLY with plain text answers to the user's message.
+- Do NOT return JSON.
+- Do NOT propose or perform actions.
+- Do NOT open apps, URLs, or files.
+- Keep responses clear, direct, and complete.
+If the request is unclear, briefly ask for clarification in plain text."""
 
     # Cached prompt templates to avoid rebuilding each time
     PROMPT_TEMPLATE_BASE = (
-        "\nIMPORTANT: You are working in directory: {cwd}\n"
-        "For file operations, use ONLY simple filenames like 'test.txt' or 'script.py'. "
-        "NEVER use '../' or parent directory paths. Files will be created in the current directory.\n"
-        "For factual questions, ALWAYS use the 'chat' action to answer directly. "
-        "Do NOT open URLs or search online for factual questions."
+        "\nDirectory: {cwd}\n"
+        "Use simple filenames in this directory (no ../). "
+        "Answer questions with the 'chat' action. "
+        "Only run commands/open apps when the user clearly asks."
     )
 
     PROMPT_TEMPLATE_FOOTER = (
@@ -200,6 +75,9 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
         # Cache metrics
         self.parsing_stats = {"success": 0, "fallback": 0, "failed": 0}
 
+        # Always run in chat-only passthrough mode
+        self.chat_only_mode = True
+
         # Set system prompt
         self.ollama.set_system_prompt(self.SYSTEM_PROMPT)
 
@@ -225,6 +103,11 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
             Response message to display to user.
         """
         try:
+            # Chat-only passthrough: send user text directly to model, return plain response.
+            if getattr(self, "chat_only_mode", False):
+                raw = self.ollama.chat(user_input, stream=False)
+                return self._extract_plain_text(raw)
+
             # Store user input for validation
             self.last_user_input = user_input.lower()
 
@@ -238,6 +121,13 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
             if not action_data:
                 # If parsing failed, return the AI response as-is
                 return ai_response
+
+            # If the user asked a question, force this to be a chat/clarify response.
+            action_data = self._enforce_chat_for_questions(
+                action_data,
+                user_input,
+                ai_response
+            )
 
             # Execute the action
             result = self._execute_action(action_data)
@@ -384,6 +274,20 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
                     "explanation": response.strip()
                 }
 
+            # As a last structured attempt, look for a loose JSON object containing "action"
+            loose_match = re.search(r'\{[^{}]*"action"\s*:\s*"[^"]+"[^{}]*\}', response, re.DOTALL)
+            if loose_match:
+                try:
+                    obj = json.loads(loose_match.group(0))
+                    normalized = _normalize_action(obj)
+                    if normalized:
+                        parsing_method = "regex_action"
+                        self.parsing_stats["success"] += 1
+                        logger.debug(f"Parsing stats: {self.parsing_stats}")
+                        return normalized
+                except json.JSONDecodeError:
+                    pass
+
             # Not structured JSON, treat as chat response
             parsing_method = "text_fallback"
             self.parsing_stats["fallback"] += 1
@@ -399,6 +303,44 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
             logger.error(f"Failed to parse AI response: {e}. Parsing stats: {self.parsing_stats}")
             return None
 
+    def _looks_like_question(self, user_input: str) -> bool:
+        """Lightweight question detection to avoid accidental actions on questions."""
+        text = user_input.lower().strip()
+        if not text:
+            return False
+        question_starters = ("what", "why", "how", "when", "where", "who", "tell me", "explain", "could you", "would you", "can you", "help me")
+        if text.endswith("?"):
+            return True
+        if text.startswith(question_starters):
+            return True
+        # Common patterns
+        for phrase in ("how do i", "how to", "what is", "best way to", "give me", "walk me through", "outline", "steps", "guide", "instructions"):
+            if phrase in text:
+                return True
+        return False
+
+    def _enforce_chat_for_questions(
+        self,
+        action_data: Dict[str, Any],
+        user_input: str,
+        raw_response: str
+    ) -> Dict[str, Any]:
+        """Force chat/clarify for question-like prompts to prevent accidental actions."""
+        if not self._looks_like_question(user_input):
+            return action_data
+
+        action = action_data.get("action")
+        if action in {"chat", "clarify"}:
+            return action_data
+
+        # Convert to chat with the best available explanation
+        explanation = action_data.get("explanation") or raw_response.strip()
+        return {
+            "action": "chat",
+            "parameters": {},
+            "explanation": explanation
+        }
+
     def _validate_response_content(self, action: str, explanation: str) -> tuple[bool, str]:
         """Validate that a response has actual content.
 
@@ -411,26 +353,38 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
         """
         # For chat actions, ensure there's actual content
         if action == "chat":
-            # Check if explanation is empty or just a placeholder
-            if not explanation or len(explanation.strip()) < 10:
-                return False, "The AI response was empty. Please try rephrasing your question or use a better model."
-
-            # Check for common placeholder phrases that indicate no real answer
-            placeholder_phrases = [
-                "providing an answer",
-                "let me answer",
-                "i'll explain",
-                "here's the answer",
-                "opening",
-                "searching for"
-            ]
-
-            explanation_lower = explanation.lower()
-            # If it's very short and contains only placeholder text, it's invalid
-            if len(explanation) < 50 and any(phrase in explanation_lower for phrase in placeholder_phrases):
-                return False, "The AI didn't provide a complete answer. Please try: 1) Rephrasing your question, 2) Using a larger model (llama3.1:8b recommended), or 3) Being more specific."
+            # Only guard against truly empty output; be lenient for small models.
+            if not explanation or len(explanation.strip()) < 4:
+                return False, "I didn't catch an answer. Could you restate the question?"
 
         return True, explanation
+
+    def _clean_explanation(self, explanation: str) -> str:
+        """Remove action-like wording and return a text-only message."""
+        if not explanation:
+            return ""
+        lower = explanation.lower()
+        blocked_terms = ["opening", "open", "launching", "launch", "starting", "email client", "browser", "app", "application"]
+        if any(term in lower for term in blocked_terms):
+            return "Text-only mode: I won't open or launch anything. I'll stick to answering in text."
+        return explanation
+
+    def _extract_plain_text(self, raw: str) -> str:
+        """If the model returns JSON, unwrap common fields to plain text."""
+        try:
+            obj = json.loads(raw)
+            # If it's a list, take the first dict
+            if isinstance(obj, list) and obj:
+                obj = obj[0]
+            if isinstance(obj, dict):
+                for key in ("content", "explanation", "message", "text"):
+                    if key in obj and isinstance(obj[key], str):
+                        return obj[key]
+                # Fallback: stringify dict
+                return json.dumps(obj, ensure_ascii=False)
+        except Exception:
+            pass
+        return raw
 
     def _execute_action(self, action_data: Dict[str, Any]) -> str:
         """Execute a specific action.
@@ -444,6 +398,20 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
         action = action_data.get("action")
         params = action_data.get("parameters", {})
         explanation = action_data.get("explanation", "")
+
+        if action == "chat":
+            explanation = self._clean_explanation(explanation) or explanation
+
+        # Block app/URL/file launching actions entirely.
+        disabled_actions = {"open_app", "close_app", "open_url", "open_file"}
+        if action in disabled_actions:
+            cleaned = self._clean_explanation(explanation)
+            return cleaned or "Text-only mode: I won't open or close applications or URLs, but I can answer questions."
+
+        # Final guard: if this looks like a question, treat anything non-chat/clarify as chat.
+        if action not in {"chat", "clarify"} and self._looks_like_question(self.last_user_input):
+            cleaned = self._clean_explanation(explanation)
+            return cleaned or "Text-only mode: I'll answer your question directly."
 
         # Validate response content
         is_valid, result = self._validate_response_content(action, explanation)
@@ -461,7 +429,12 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
             if action == "clarify":
                 question = explanation or params.get("question") or "Could you clarify?"
                 return question
-            return f"Unknown action: {action}"
+            # Fall back to returning the explanation as a normal chat response
+            if explanation:
+                return explanation
+            if params.get("question"):
+                return params["question"]
+            return "I need a bit more detail to help. What exactly would you like?"
 
         # Check permissions
         permitted, reason = self.safety.check_permission(operation)
@@ -503,19 +476,15 @@ Always wrap your JSON response in ```json``` code blocks, with nothing before or
             Operation object or None if action is unknown.
         """
         action_map = {
-            "open_app": (OperationType.APP_OPEN, "app_name"),
-            "close_app": (OperationType.APP_CLOSE, "app_name"),
             "create_file": (OperationType.FILE_CREATE, "file_path"),
             "append_file": (OperationType.FILE_APPEND, "file_path"),
             "read_file": (OperationType.FILE_READ, "file_path"),
             "modify_file": (OperationType.FILE_MODIFY, "file_path"),
             "delete_file": (OperationType.FILE_DELETE, "file_path"),
-            "open_file": (OperationType.FILE_OPEN, "file_path"),
             "create_directory": (OperationType.DIR_CREATE, "dir_path"),
             "delete_directory": (OperationType.DIR_DELETE, "dir_path"),
             "list_directory": (OperationType.DIR_LIST, "dir_path"),
             "search_files": (OperationType.FILE_SEARCH, "directory"),
-            "open_url": (OperationType.BROWSER_OPEN, "url"),
             "clarify": (OperationType.FILE_READ, "question"),  # benign placeholder
         }
 
